@@ -443,11 +443,14 @@
           </p>
           <div class="form-grid">
             <label class="field span-2">
-              <span>Gemini API Key</span>
-              <input type="password" id="geminiKeyInput" placeholder="AIza..." autocomplete="off" />
+              <span>Gemini API Key (empieza con AIza...)</span>
+              <div class="inline-row">
+                <input type="password" id="geminiKeyInput" placeholder="Pega aquí tu clave AIza..." autocomplete="off" spellcheck="false" />
+                <button type="button" class="btn btn-ghost btn-sm" id="toggleKeyVisBtn" title="Mostrar u ocultar clave">Ver</button>
+              </div>
             </label>
             <label class="field span-2">
-              <span>Modelo</span>
+              <span>Modelo (se detecta automáticamente)</span>
               <div class="inline-row">
                 <input type="text" id="geminiModelInput" list="geminiModelSuggestions" placeholder="gemini-3.8-flash" />
                 <button type="button" class="btn btn-ghost btn-sm" id="detectModelsBtn">Detectar</button>
@@ -460,9 +463,9 @@
           </div>
           <div class="targets-preview hidden" id="geminiTestResult"></div>
           <div class="modal-footer">
-            <button type="button" class="btn btn-ghost btn-sm" id="testGeminiBtn">Probar conexión</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="testGeminiBtn">Probar</button>
             <div class="spacer"></div>
-            <button type="submit" class="btn btn-primary">Guardar configuración IA</button>
+            <button type="submit" class="btn btn-primary" id="saveGeminiBtn">Guardar y conectar IA</button>
           </div>
         </form>
 
@@ -556,6 +559,6 @@
   <!-- Toast Container -->
   <div class="toast-container" id="toastContainer" aria-live="polite"></div>
 
-  <script type="module" src="app.js?v=14"></script>
+  <script type="module" src="app.js?v=15"></script>
 </body>
 </html>

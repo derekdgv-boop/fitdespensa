@@ -11,28 +11,54 @@ const MODEL_STORAGE = 'fitdespensa_gemini_model';
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const DEPRECATED_MODELS = new Set(['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']);
 
+const memFallback = { key: '', model: DEFAULT_GEMINI_MODEL };
+
+function safeGet(k) {
+  try {
+    return localStorage.getItem(k) || '';
+  } catch {
+    return k === KEY_STORAGE ? memFallback.key : memFallback.model;
+  }
+}
+
+function safeSet(k, v) {
+  if (k === KEY_STORAGE) memFallback.key = v;
+  if (k === MODEL_STORAGE) memFallback.model = v;
+  try {
+    if (v) localStorage.setItem(k, v);
+    else localStorage.removeItem(k);
+  } catch {
+    // Fallback in memory if browser blocks localStorage
+  }
+}
+
+/** Extracts a clean Gemini API key even if the user pasted a curl snippet, quotes, or spaces. */
+export function sanitizeApiKey(raw) {
+  const str = String(raw || '').trim();
+  const match = str.match(/AIza[A-Za-z0-9_-]{30,}/);
+  if (match) return match[0];
+  return str.replace(/^['"`]+|['"`]+$/g, '').replace(/\s+/g, '');
+}
+
 export function getGeminiConfig() {
-  let savedModel = (localStorage.getItem(MODEL_STORAGE) || '').trim().replace(/^models\//, '');
+  let savedModel = safeGet(MODEL_STORAGE).trim().replace(/^models\//, '');
   if (!savedModel || DEPRECATED_MODELS.has(savedModel)) {
     savedModel = DEFAULT_GEMINI_MODEL;
-    localStorage.setItem(MODEL_STORAGE, savedModel);
+    safeSet(MODEL_STORAGE, savedModel);
   }
   return {
-    apiKey: (localStorage.getItem(KEY_STORAGE) || '').trim(),
+    apiKey: sanitizeApiKey(safeGet(KEY_STORAGE)),
     model: savedModel,
   };
 }
 
 export function setGeminiConfig({ apiKey, model }) {
   if (apiKey !== undefined) {
-    const clean = String(apiKey).trim();
-    if (clean) localStorage.setItem(KEY_STORAGE, clean);
-    else localStorage.removeItem(KEY_STORAGE);
+    safeSet(KEY_STORAGE, sanitizeApiKey(apiKey));
   }
   if (model !== undefined) {
     const cleanModel = String(model).trim().replace(/^models\//, '');
-    if (cleanModel) localStorage.setItem(MODEL_STORAGE, cleanModel);
-    else localStorage.removeItem(MODEL_STORAGE);
+    safeSet(MODEL_STORAGE, cleanModel);
   }
 }
 
@@ -138,6 +164,27 @@ function parseJsonResponse(res, fallbackError) {
     }
     throw new Error('La respuesta de IA no tuvo formato válido. Intenta de nuevo.');
   }
+}
+
+export async function connectAndVerifyGemini(rawKey, preferredModel = '') {
+  const cleanKey = sanitizeApiKey(rawKey);
+  if (!cleanKey) {
+    throw new Error('Pega primero tu API Key (empieza con AIza...) en el campo de arriba.');
+  }
+  setGeminiConfig({ apiKey: cleanKey, model: preferredModel || undefined });
+
+  // 1) List available models for this exact key to pick a guaranteed-valid model
+  const models = await listGeminiModels();
+  if (!models.length) {
+    throw new Error('La clave es válida pero no tiene modelos Gemini habilitados en Google AI Studio.');
+  }
+  const current = getGeminiConfig().model;
+  const chosen = models.includes(current) ? current : pickBestFlashModel(models) || models[0];
+  setGeminiConfig({ apiKey: cleanKey, model: chosen });
+
+  // 2) Run a lightweight generation test
+  await testGeminiConnection();
+  return { apiKey: cleanKey, model: chosen, availableCount: models.length };
 }
 
 export async function testGeminiConnection() {

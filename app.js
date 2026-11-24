@@ -22,6 +22,7 @@ import {
 import { getHouseholdCode, initStorage, setHouseholdCode } from './storage.js?v=13';
 import { canUseWebcam, compressFile, dataUrlByteSize, isMobileDevice, startBarcodeScanner, startWebcam } from './camera.js?v=13';
 import {
+  connectAndVerifyGemini,
   generatePantryRecommendations,
   getGeminiConfig,
   hasGeminiKey,
@@ -29,8 +30,7 @@ import {
   recognizeProduct,
   runCoachTurn,
   setGeminiConfig,
-  testGeminiConnection,
-} from './ai.js?v=14';
+} from './ai.js?v=15';
 import {
   esc,
   formatCoachText,
@@ -1123,36 +1123,59 @@ function bindEvents() {
     toast('Meta fitness guardada');
   });
 
-  $('geminiForm').addEventListener('submit', (e) => {
-    e.preventDefault();
-    setGeminiConfig({
-      apiKey: $('geminiKeyInput').value,
-      model: $('geminiModelInput').value,
-    });
-    renderAll();
-    toast('Configuración de Gemini guardada');
+  $('toggleKeyVisBtn').addEventListener('click', () => {
+    const inp = $('geminiKeyInput');
+    const isHidden = inp.type === 'password';
+    inp.type = isHidden ? 'text' : 'password';
+    $('toggleKeyVisBtn').textContent = isHidden ? 'Ocultar' : 'Ver';
   });
 
-  $('testGeminiBtn').addEventListener('click', async () => {
-    setGeminiConfig({
-      apiKey: $('geminiKeyInput').value,
-      model: $('geminiModelInput').value,
-    });
-    renderAll();
-    const btn = $('testGeminiBtn');
+  async function runGeminiConnect(closeOnSuccess = false) {
     const out = $('geminiTestResult');
+    const saveBtn = $('saveGeminiBtn');
+    const testBtn = $('testGeminiBtn');
     out.classList.remove('hidden');
-    out.textContent = 'Probando conexión con Gemini...';
-    btn.disabled = true;
+    out.innerHTML = '⏳ Validando tu API Key y detectando el modelo compatible en Google...';
+    saveBtn.disabled = true;
+    testBtn.disabled = true;
+
     try {
-      await testGeminiConnection();
-      out.innerHTML = `<strong style="color:var(--ok)">Conexión exitosa</strong> con el modelo <code>${esc(getGeminiConfig().model)}</code>.`;
-      toast('¡Conexión exitosa con Gemini!');
+      const info = await connectAndVerifyGemini($('geminiKeyInput').value, $('geminiModelInput').value);
+      $('geminiKeyInput').value = info.apiKey;
+      $('geminiModelInput').value = info.model;
+      state.aiRecsError = null;
+      renderAll();
+      out.innerHTML = `<strong style="color:var(--ok)">✅ ¡Conectado con éxito!</strong> Modelo activo: <code>${esc(info.model)}</code> (${info.availableCount} disponibles).`;
+      toast('¡IA de Gemini conectada y lista!');
+      if (closeOnSuccess) {
+        setTimeout(() => {
+          $('settingsModal').classList.add('hidden');
+          requestAiRecommendations('general');
+        }, 800);
+      }
     } catch (err) {
-      out.innerHTML = `<strong style="color:var(--danger)">Error de Gemini:</strong> ${esc(err.message)}<div class="muted small-note" style="margin-top:4px;">Si dice que el modelo no existe, pulsa <strong>Detectar</strong> para elegir uno disponible para tu clave.</div>`;
+      renderAll();
+      const msg = String(err.message || err);
+      let hint = 'Verifica que copiaste la clave completa (empieza con <code>AIza...</code>) desde Google AI Studio.';
+      if (msg.toLowerCase().includes('referer') || msg.toLowerCase().includes('blocked')) {
+        hint = 'Tu clave tiene restricciones de sitio web en Google Cloud/AI Studio. Quita las restricciones de HTTP Referrer o agrega <code>https://derekdgv-boop.github.io/*</code>.';
+      } else if (msg.toLowerCase().includes('failed to fetch') || msg.toLowerCase().includes('network')) {
+        hint = 'El navegador o red bloqueó la conexión a <code>generativelanguage.googleapis.com</code>. Pruébalo directo en Chrome o Safari.';
+      }
+      out.innerHTML = `<strong style="color:var(--danger)">❌ No se pudo conectar:</strong> ${esc(msg)}<div class="muted small-note" style="margin-top:6px;">💡 ${hint}</div>`;
     } finally {
-      btn.disabled = false;
+      saveBtn.disabled = false;
+      testBtn.disabled = false;
     }
+  }
+
+  $('geminiForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    runGeminiConnect(true);
+  });
+
+  $('testGeminiBtn').addEventListener('click', () => {
+    runGeminiConnect(false);
   });
 
   $('detectModelsBtn').addEventListener('click', async () => {
