@@ -204,7 +204,10 @@ export function renderAiRecommendations(data, addedNames = new Set()) {
     .join('');
 
   return `
-    <div class="recs-headline">✨ ${esc(data.headline || '')}</div>
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+      <div class="recs-headline">✨ ${esc(data.headline || '')}</div>
+      <button type="button" class="icon-btn icon-btn-sm" data-action="close-recs" title="Ocultar recomendaciones" aria-label="Ocultar">✕</button>
+    </div>
     <div class="recs-insights-grid">${insightsHtml}</div>
     ${
       buysHtml

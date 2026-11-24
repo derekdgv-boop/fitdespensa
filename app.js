@@ -30,7 +30,7 @@ import {
   runCoachTurn,
   setGeminiConfig,
   testGeminiConnection,
-} from './ai.js?v=13';
+} from './ai.js?v=14';
 import {
   esc,
   formatCoachText,
@@ -41,7 +41,7 @@ import {
   renderPantryOverview,
   renderPantryQuality,
   renderShoppingList,
-} from './ui.js?v=13';
+} from './ui.js?v=14';
 
 const SVG_SUN = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>`;
 const SVG_MOON = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>`;
@@ -65,6 +65,7 @@ const state = {
   stockFilter: 'all',
   viewMode: localStorage.getItem('fitdespensa_view') || 'grid',
   aiRecs: null,
+  aiRecsError: null,
   aiRecsAdded: new Set(),
   aiRecsBusy: false,
   barcodeScanner: null,
@@ -168,6 +169,19 @@ function renderRecsPanels() {
   const body = $('aiRecsBody');
   const shopBox = $('shoppingAiBox');
 
+  if (!hasGeminiKey()) {
+    const promptKey = `
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+        <span class="muted small-note">🔑 Falta tu API Key de Gemini en este navegador/dispositivo para activar la IA.</span>
+        <button type="button" class="btn btn-primary btn-xs" data-action="open-ai-settings">Configurar clave gratis</button>
+      </div>
+    `;
+    body.classList.remove('hidden');
+    body.innerHTML = promptKey;
+    shopBox.classList.add('hidden');
+    return;
+  }
+
   if (state.aiRecsBusy) {
     const loading = `<div class="muted small-note">✨ Gemini está analizando tu inventario y metas fitness...</div>`;
     body.classList.remove('hidden');
@@ -179,13 +193,28 @@ function renderRecsPanels() {
     return;
   }
 
+  if (state.aiRecsError) {
+    const errHtml = `
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+        <span style="color:var(--danger); font-size:0.83rem;">⚠️ ${esc(state.aiRecsError)}</span>
+        <button type="button" class="btn btn-ghost btn-xs" data-action="open-ai-settings">Revisar clave / modelo</button>
+      </div>
+    `;
+    body.classList.remove('hidden');
+    body.innerHTML = errHtml;
+    if (state.activeTab === 'shopping') {
+      shopBox.classList.remove('hidden');
+      shopBox.innerHTML = `<div class="card">${errHtml}</div>`;
+    }
+    return;
+  }
+
   if (!state.aiRecs) {
     body.classList.add('hidden');
     shopBox.classList.add('hidden');
     return;
   }
 
-  // Mark items already in shopping list
   state.items.filter(inShoppingList).forEach((it) => state.aiRecsAdded.add(normText(it.name)));
 
   const html = renderAiRecommendations(state.aiRecs, state.aiRecsAdded);
@@ -309,17 +338,14 @@ function buildInventorySummaryPayload() {
 
 async function requestAiRecommendations(focus = 'general') {
   if (!hasGeminiKey()) {
-    toast('Configura tu API key de Gemini en Ajustes para recibir recomendaciones.');
+    toast('Pega tu API key de Gemini en Ajustes → IA para usar las recomendaciones.');
     openSettingsModal('ai');
-    return;
-  }
-  if (!state.items.length) {
-    toast('Primero agrega productos o carga el ejemplo fitness.');
     return;
   }
   if (state.aiRecsBusy) return;
 
   state.aiRecsBusy = true;
+  state.aiRecsError = null;
   renderRecsPanels();
   try {
     state.aiRecs = await generatePantryRecommendations({
@@ -327,7 +353,8 @@ async function requestAiRecommendations(focus = 'general') {
       focus,
     });
   } catch (err) {
-    toast('Error de IA: ' + err.message);
+    state.aiRecsError = err.message || String(err);
+    toast('Error de IA: ' + state.aiRecsError);
   } finally {
     state.aiRecsBusy = false;
     renderRecsPanels();
@@ -889,7 +916,12 @@ function bindEvents() {
     const { action, id, dir, idx } = btn.dataset;
 
     if (action === 'open-settings') openSettingsModal('profile');
-    else if (action === 'go-catalog') switchTab('catalog');
+    else if (action === 'open-ai-settings') openSettingsModal('ai');
+    else if (action === 'close-recs') {
+      state.aiRecs = null;
+      state.aiRecsError = null;
+      renderRecsPanels();
+    } else if (action === 'go-catalog') switchTab('catalog');
     else if (action === 'go-shopping') switchTab('shopping');
     else if (action === 'go-coach') switchTab('coach');
     else if (action === 'toggle-quality') {

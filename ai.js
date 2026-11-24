@@ -1,8 +1,9 @@
-// ai.js — Gemini REST client for FitDespensa (100% Inventory + AI Recommendations):
+// ai.js — Bulletproof Gemini REST client for FitDespensa:
 // 1) Automatic full nutrition table recognition from product/label photos
-// 2) Structured AI Pantry & Shopping Recommendations
+// 2) Structured AI Pantry & Shopping Recommendations (works even on empty pantry)
 // 3) Conversational & Multimodal Inventory Coach IA (photo + voice + text)
-import { CATEGORY_NAMES, UNITS } from './constants.js?v=13';
+// Includes automatic model discovery/fallback and resilient JSON parsing.
+import { CATEGORY_NAMES, UNITS } from './constants.js?v=14';
 import { DEFAULT_GEMINI_MODEL } from './firebase-config.js?v=7';
 
 const KEY_STORAGE = 'fitdespensa_gemini_key';
@@ -29,7 +30,7 @@ export function setGeminiConfig({ apiKey, model }) {
     else localStorage.removeItem(KEY_STORAGE);
   }
   if (model !== undefined) {
-    const cleanModel = String(model).trim();
+    const cleanModel = String(model).trim().replace(/^models\//, '');
     if (cleanModel) localStorage.setItem(MODEL_STORAGE, cleanModel);
     else localStorage.removeItem(MODEL_STORAGE);
   }
@@ -37,11 +38,33 @@ export function setGeminiConfig({ apiKey, model }) {
 
 export const hasGeminiKey = () => Boolean(getGeminiConfig().apiKey);
 
-async function callGemini(body) {
-  const { apiKey, model } = getGeminiConfig();
-  if (!apiKey) {
-    throw new Error('Configura tu API key de Gemini en Ajustes para usar la IA.');
+export async function listGeminiModels() {
+  const { apiKey } = getGeminiConfig();
+  if (!apiKey) throw new Error('Primero pega tu API key de Gemini.');
+  const res = await fetch(`${API_BASE}?key=${encodeURIComponent(apiKey)}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.error?.message || `Error ${res.status} al validar tu clave en Google`);
   }
+  return (data.models || [])
+    .filter((m) => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
+    .map((m) => String(m.name || '').replace(/^models\//, ''))
+    .filter((name) => name.includes('gemini'));
+}
+
+function pickBestFlashModel(models, exclude = '') {
+  const pool = models.filter((m) => m !== exclude && !DEPRECATED_MODELS.has(m));
+  return (
+    pool.find((m) => m === 'gemini-3.8-flash') ||
+    pool.find((m) => m.includes('3.') && m.includes('flash')) ||
+    pool.find((m) => m.includes('flash')) ||
+    pool[0] ||
+    models[0] ||
+    null
+  );
+}
+
+async function rawGenerate(apiKey, model, body) {
   const cleanModel = model.replace(/^models\//, '');
   const url = `${API_BASE}/${encodeURIComponent(cleanModel)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const res = await fetch(url, {
@@ -50,11 +73,71 @@ async function callGemini(body) {
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const msg = data?.error?.message || `Error ${res.status} al consultar Gemini`;
+  return { ok: res.ok, status: res.status, data };
+}
+
+async function callGemini(body) {
+  const { apiKey, model } = getGeminiConfig();
+  if (!apiKey) {
+    throw new Error('Falta tu API Key de Gemini en este dispositivo/navegador. Ábrela en Ajustes → IA (Gemini).');
+  }
+
+  let attempt = await rawGenerate(apiKey, model, body);
+  if (!attempt.ok) {
+    const errMsg = String(attempt.data?.error?.message || '');
+    const isModelError =
+      attempt.status === 404 ||
+      errMsg.toLowerCase().includes('no longer available') ||
+      errMsg.toLowerCase().includes('not found') ||
+      errMsg.toLowerCase().includes('not supported');
+
+    if (isModelError) {
+      try {
+        const available = await listGeminiModels();
+        const fallback = pickBestFlashModel(available, model);
+        if (fallback && fallback !== model) {
+          setGeminiConfig({ model: fallback });
+          attempt = await rawGenerate(apiKey, fallback, body);
+        }
+      } catch {
+        // Keep original error if listing models also fails
+      }
+    }
+  }
+
+  if (!attempt.ok) {
+    const msg = attempt.data?.error?.message || `Error ${attempt.status} al consultar Gemini`;
     throw new Error(msg);
   }
-  return data;
+  return attempt.data;
+}
+
+function extractTextFromResponse(res) {
+  const parts = res?.candidates?.[0]?.content?.parts || [];
+  return parts
+    .filter((p) => typeof p.text === 'string' && !p.thought)
+    .map((p) => p.text)
+    .join('\n')
+    .trim();
+}
+
+function parseJsonResponse(res, fallbackError) {
+  const raw = extractTextFromResponse(res);
+  if (!raw) throw new Error(fallbackError);
+  const cleaned = raw
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
+    }
+    throw new Error('La respuesta de IA no tuvo formato válido. Intenta de nuevo.');
+  }
 }
 
 export async function testGeminiConnection() {
@@ -67,20 +150,6 @@ export async function testGeminiConnection() {
   return true;
 }
 
-export async function listGeminiModels() {
-  const { apiKey } = getGeminiConfig();
-  if (!apiKey) throw new Error('Primero pega tu API key de Gemini.');
-  const res = await fetch(`${API_BASE}?key=${encodeURIComponent(apiKey)}`);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(data?.error?.message || `Error ${res.status} al listar modelos`);
-  }
-  return (data.models || [])
-    .filter((m) => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
-    .map((m) => String(m.name || '').replace(/^models\//, ''))
-    .filter((name) => name.includes('gemini'));
-}
-
 // =========================================================================
 // 1) Product / Nutrition Label Photo Auto-Fill
 // =========================================================================
@@ -88,15 +157,15 @@ const PRODUCT_SCHEMA = {
   type: 'OBJECT',
   properties: {
     name: { type: 'STRING', description: 'Nombre claro y corto del producto en español' },
-    category: { type: 'STRING', enum: CATEGORY_NAMES },
-    unit: { type: 'STRING', enum: UNITS },
+    category: { type: 'STRING', description: `Categoría exacta de: ${CATEGORY_NAMES.join(', ')}` },
+    unit: { type: 'STRING', description: `Unidad exacta de: ${UNITS.join(', ')}` },
     serving: { type: 'STRING', description: 'Descripción de 1 porción, ej. "1 scoop (30 g)" o "100 g"' },
     servingsPerUnit: { type: 'NUMBER', description: 'Cantidad aproximada de porciones por envase/unidad' },
     kcal: { type: 'NUMBER', description: 'Calorías por porción' },
     protein: { type: 'NUMBER', description: 'Gramos de proteína por porción' },
-    proteinType: { type: 'STRING', enum: ['animal', 'vegetal', 'suplemento'] },
+    proteinType: { type: 'STRING', description: 'animal, vegetal o suplemento' },
     carbs: { type: 'NUMBER', description: 'Gramos totales de carbohidratos por porción' },
-    carbType: { type: 'STRING', enum: ['complejo', 'simple', 'fibroso'] },
+    carbType: { type: 'STRING', description: 'complejo, simple o fibroso' },
     fiber: { type: 'NUMBER', description: 'Gramos de fibra dietética por porción' },
     sugar: { type: 'NUMBER', description: 'Gramos de azúcares por porción' },
     fat: { type: 'NUMBER', description: 'Gramos totales de grasa por porción' },
@@ -115,6 +184,7 @@ export async function recognizeProduct(photoDataUrl) {
   const prompt = [
     'Analiza esta foto de un alimento, empaque o tabla nutrimental.',
     'Extrae o estima con alta precisión TODOS los valores de su tabla nutrimental por porción en español:',
+    `categoría (elige una de: ${CATEGORY_NAMES.join(', ')}), unidad (elige una de: ${UNITS.join(', ')}),`,
     'calorías, proteína y su tipo (animal/vegetal/suplemento), carbohidratos y su tipo (complejo/simple/fibroso),',
     'fibra, azúcares, grasas totales, grasas saturadas, grasas insaturadas/saludables y sodio (mg).',
     'Si se ve la tabla nutrimental impresa, copia los números exactos. Si es un alimento fresco, usa valores estándar USDA.',
@@ -130,9 +200,7 @@ export async function recognizeProduct(photoDataUrl) {
     },
   });
 
-  const text = res?.candidates?.[0]?.content?.parts?.find((p) => p.text && !p.thought)?.text;
-  if (!text) throw new Error('Gemini no devolvió datos del producto.');
-  return JSON.parse(text);
+  return parseJsonResponse(res, 'Gemini no devolvió datos del producto.');
 }
 
 // =========================================================================
@@ -141,31 +209,29 @@ export async function recognizeProduct(photoDataUrl) {
 const RECOMMENDATIONS_SCHEMA = {
   type: 'OBJECT',
   properties: {
-    headline: { type: 'STRING', description: 'Diagnóstico breve y motivador de 1 línea sobre el estado actual de la despensa' },
+    headline: { type: 'STRING', description: 'Diagnóstico breve y motivador de 1 línea sobre la despensa' },
     insights: {
       type: 'ARRAY',
-      description: '3 recomendaciones accionables basadas en el inventario actual y objetivo fitness',
       items: {
         type: 'OBJECT',
         properties: {
-          badge: { type: 'STRING', description: 'Etiqueta corta, ej. "Proteína", "Balance", "Ahorro", "Combinación"' },
-          title: { type: 'STRING', description: 'Título corto y directo' },
-          detail: { type: 'STRING', description: 'Explicación práctica de 1-2 oraciones usando los productos reales' },
+          badge: { type: 'STRING' },
+          title: { type: 'STRING' },
+          detail: { type: 'STRING' },
         },
         required: ['badge', 'title', 'detail'],
       },
     },
     suggestedPurchases: {
       type: 'ARRAY',
-      description: 'De 2 a 4 alimentos fitness recomendados para comprar que complementen lo que falta en la despensa',
       items: {
         type: 'OBJECT',
         properties: {
           name: { type: 'STRING' },
-          category: { type: 'STRING', enum: CATEGORY_NAMES },
-          unit: { type: 'STRING', enum: UNITS },
-          qty: { type: 'NUMBER', description: 'Cantidad recomendada a comprar' },
-          reason: { type: 'STRING', description: 'Por qué conviene agregarlo según el objetivo y los macros actuales' },
+          category: { type: 'STRING' },
+          unit: { type: 'STRING' },
+          qty: { type: 'NUMBER' },
+          reason: { type: 'STRING' },
         },
         required: ['name', 'category', 'unit', 'qty', 'reason'],
       },
@@ -175,16 +241,22 @@ const RECOMMENDATIONS_SCHEMA = {
 };
 
 export async function generatePantryRecommendations({ inventorySummary, focus = 'general' }) {
+  const isEmpty = !inventorySummary?.items?.length;
   const focusMap = {
-    general: 'Analiza el balance general de la despensa, qué se está acabando, calidad de proteínas/carbos/grasas y qué conviene comprar.',
+    general: isEmpty
+      ? 'La despensa está vacía todavía. Recomienda un kit base ideal de compras fitness según el objetivo del usuario.'
+      : 'Analiza el balance general de la despensa, qué se está acabando, calidad de proteínas/carbos/grasas y qué conviene comprar.',
     shopping: 'Enfócate en optimizar la próxima compra del súper según el objetivo fitness (definición/mantenimiento/volumen) y los huecos nutricionales.',
-    meals: 'Recomienda combinaciones rápidas y altas en proteína que se pueden preparar HOY usando únicamente lo que hay con stock > 0, y qué ingrediente clave falta.',
+    meals: isEmpty
+      ? 'Sugiere 3 combinaciones fitness básicas que podrá preparar en cuanto compre sus básicos de despensa.'
+      : 'Recomienda 3 combinaciones rápidas y altas en proteína que se pueden preparar HOY usando únicamente lo que hay con stock > 0, y qué ingrediente clave falta.',
   };
 
   const prompt = [
-    'Eres un experto en nutrición deportiva y gestión inteligente de despensa.',
+    'Eres un experto en nutrición deportiva y gestión inteligente de despensa en español.',
     focusMap[focus] || focusMap.general,
-    'Datos reales del inventario y perfil del usuario:',
+    `Usa categorías de: ${CATEGORY_NAMES.join(', ')} y unidades de: ${UNITS.join(', ')}.`,
+    'Datos actuales del inventario y perfil:',
     JSON.stringify(inventorySummary),
   ].join('\n');
 
@@ -197,9 +269,7 @@ export async function generatePantryRecommendations({ inventorySummary, focus = 
     },
   });
 
-  const text = res?.candidates?.[0]?.content?.parts?.find((p) => p.text && !p.thought)?.text;
-  if (!text) throw new Error('No se pudieron generar recomendaciones.');
-  return JSON.parse(text);
+  return parseJsonResponse(res, 'No se pudieron generar recomendaciones.');
 }
 
 // =========================================================================
@@ -227,25 +297,25 @@ const COACH_TOOLS = [
           type: 'OBJECT',
           properties: {
             name: { type: 'STRING' },
-            category: { type: 'STRING', enum: CATEGORY_NAMES },
-            unit: { type: 'STRING', enum: UNITS },
+            category: { type: 'STRING', description: `Una de: ${CATEGORY_NAMES.join(', ')}` },
+            unit: { type: 'STRING', description: `Una de: ${UNITS.join(', ')}` },
             qty: { type: 'NUMBER' },
             min: { type: 'NUMBER' },
-            needBuy: { type: 'BOOLEAN', description: 'True si se agrega con qty 0 directo para comprar' },
+            needBuy: { type: 'BOOLEAN' },
             serving: { type: 'STRING' },
             servingsPerUnit: { type: 'NUMBER' },
             kcal: { type: 'NUMBER' },
             protein: { type: 'NUMBER' },
-            proteinType: { type: 'STRING', enum: ['animal', 'vegetal', 'suplemento'] },
+            proteinType: { type: 'STRING', description: 'animal, vegetal o suplemento' },
             carbs: { type: 'NUMBER' },
-            carbType: { type: 'STRING', enum: ['complejo', 'simple', 'fibroso'] },
+            carbType: { type: 'STRING', description: 'complejo, simple o fibroso' },
             fiber: { type: 'NUMBER' },
             sugar: { type: 'NUMBER' },
             fat: { type: 'NUMBER' },
             satFat: { type: 'NUMBER' },
             unsatFat: { type: 'NUMBER' },
             sodium: { type: 'NUMBER' },
-            attachChatPhoto: { type: 'BOOLEAN', description: 'True si el usuario adjuntó foto del producto' },
+            attachChatPhoto: { type: 'BOOLEAN' },
           },
           required: ['name', 'qty'],
         },
@@ -257,8 +327,8 @@ const COACH_TOOLS = [
           type: 'OBJECT',
           properties: {
             itemName: { type: 'STRING' },
-            delta: { type: 'NUMBER', description: 'Cambio relativo (ej. -2 si se gastaron 2, +3 si compró 3)' },
-            setQty: { type: 'NUMBER', description: 'Cantidad exacta nueva' },
+            delta: { type: 'NUMBER' },
+            setQty: { type: 'NUMBER' },
           },
           required: ['itemName'],
         },
@@ -344,11 +414,7 @@ export async function runCoachTurn(history, userText, executor, photoDataUrl = n
 
     const calls = modelContent.parts.filter((p) => p.functionCall);
     if (!calls.length) {
-      const replyText = modelContent.parts
-        .filter((p) => p.text && !p.thought)
-        .map((p) => p.text)
-        .join('\n')
-        .trim();
+      const replyText = extractTextFromResponse(res);
       return { text: replyText || 'Listo.', actions, history: contents };
     }
 

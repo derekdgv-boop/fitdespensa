@@ -2141,3 +2141,136 @@ button, a, input, select {
   border-color: var(--accent);
   color: var(--accent);
 }
+
+
+/* ==========================================================================
+   MOBILE POLISH FOR 360px–430px PHONES (Pantry-first v14)
+   ========================================================================== */
+@media (max-width: 640px) {
+  /* Keep Mi Despensa compact above the fold: hide redundant top buttons & verbose sub */
+  #view-catalog > .page-head {
+    margin-bottom: 10px;
+  }
+  #view-catalog > .page-head .page-sub,
+  #view-catalog > .page-head .page-actions {
+    display: none;
+  }
+
+  /* Compact 2x2 overview tiles */
+  #pantryOverviewStrip {
+    gap: 7px;
+    margin-bottom: 10px;
+  }
+  #pantryOverviewStrip .live-pill {
+    padding: 8px 10px;
+    border-radius: 11px;
+    gap: 2px;
+  }
+  #pantryOverviewStrip .live-pill-label { font-size: 0.68rem; }
+  #pantryOverviewStrip .live-pill-val { font-size: 0.92rem; }
+  #pantryOverviewStrip .live-pill-sub { font-size: 0.66rem; }
+
+  /* Compact AI Recommendations bar with horizontal swipeable buttons */
+  .ai-recs-card {
+    padding: 11px 12px;
+    margin-bottom: 10px;
+  }
+  .ai-recs-header { gap: 8px; }
+  .ai-recs-header .small-note { display: none; }
+  .recs-btn-group {
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+  .recs-btn-group::-webkit-scrollbar { display: none; }
+  .recs-btn-group .btn { flex-shrink: 0; }
+  .recs-insights-grid,
+  .recs-buys-list { grid-template-columns: 1fr; }
+
+  /* Compact collapsible pantry quality bar */
+  .pantry-quality-details {
+    padding: 10px 12px;
+    margin-bottom: 10px;
+  }
+  .pantry-quality-details summary { font-size: 0.78rem; line-height: 1.35; }
+
+  /* Zero-overflow toolbar on 360px phones */
+  .toolbar { gap: 7px; margin-bottom: 10px; }
+  .toolbar > .segmented:first-of-type {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .toolbar > .segmented:first-of-type .seg-btn {
+    justify-content: center;
+    padding: 6px 4px;
+    font-size: 0.73rem;
+  }
+
+  /* Crisp 2-column cards even on 360px–390px phones */
+  .catalog-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+  }
+  .item-media .status-pill {
+    top: 7px;
+    left: 7px;
+    padding: 2px 7px;
+    font-size: 0.63rem;
+  }
+  .media-edit-chip {
+    top: 7px;
+    right: 7px;
+    width: 26px;
+    height: 26px;
+  }
+  .item-name {
+    font-size: 0.84rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .macro-tags { gap: 4px; }
+  .macro-tag { font-size: 0.65rem; padding: 2px 5px; }
+  .catalog-grid .macro-tag:nth-child(n+3) { display: none; }
+
+  /* Clean list mode on mobile */
+  .catalog-list .item-media { width: 68px; height: 68px; }
+  .catalog-list .item-body { padding: 9px 11px; gap: 6px; }
+  .catalog-list .item-controls { flex-direction: row; width: auto; }
+  .catalog-list .stepper { width: auto; }
+
+  /* Shopping header actions fit cleanly */
+  #view-shopping .page-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+  #aiSuggestShoppingBtn { flex: 1 1 100%; }
+
+  /* Coach IA: compact single-row live strip + exact dvh chat fit */
+  #view-coach #liveSummaryStrip {
+    display: flex;
+    overflow-x: auto;
+    gap: 7px;
+    margin-bottom: 8px;
+    scrollbar-width: none;
+  }
+  #view-coach #liveSummaryStrip::-webkit-scrollbar { display: none; }
+  #view-coach #liveSummaryStrip .live-pill {
+    min-width: 132px;
+    flex-shrink: 0;
+    padding: 7px 10px;
+  }
+  #view-coach .coach-home {
+    height: calc(100dvh - 196px - env(safe-area-inset-bottom));
+    min-height: 330px;
+  }
+}
+
+@media (max-width: 339px) {
+  .catalog-grid { grid-template-columns: 1fr; }
+}
