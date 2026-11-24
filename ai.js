@@ -68,6 +68,8 @@ export function setGeminiConfig({ apiKey, model }) {
 
 export const hasGeminiKey = () => Boolean(getGeminiConfig().apiKey);
 
+let cachedModelsList = null;
+
 export async function listGeminiModels() {
   const { apiKey } = getGeminiConfig();
   if (!apiKey) throw new Error('Primero pega tu API key de Gemini.');
@@ -76,10 +78,26 @@ export async function listGeminiModels() {
   if (!res.ok) {
     throw new Error(data?.error?.message || `Error ${res.status} al validar tu clave en Google`);
   }
-  return (data.models || [])
+  const list = (data.models || [])
     .filter((m) => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
     .map((m) => String(m.name || '').replace(/^models\//, ''))
     .filter((name) => name.includes('gemini') && !isDeprecatedModel(name));
+  if (list.length) cachedModelsList = list;
+  return list;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function isOverloadedError(status, msg) {
+  const m = String(msg || '').toLowerCase();
+  return (
+    status === 503 ||
+    status === 429 ||
+    m.includes('high demand') ||
+    m.includes('overloaded') ||
+    m.includes('try again later') ||
+    m.includes('resource exhausted')
+  );
 }
 
 function pickBestFlashModel(models, exclude = '') {
@@ -113,9 +131,10 @@ async function callGemini(body) {
   }
 
   let attempt = await rawGenerate(apiKey, model, body);
+
+  // 1) If Google suggests a newer replacement model in its error message, adopt it immediately
   if (!attempt.ok) {
     const errMsg = String(attempt.data?.error?.message || '');
-    // If Google explicitly tells us which replacement model to use, switch to it immediately!
     const suggestedMatch = errMsg.match(/models\/(gemini-[a-zA-Z0-9._-]+)/);
     if (suggestedMatch && suggestedMatch[1] && suggestedMatch[1] !== model) {
       const suggested = suggestedMatch[1];
@@ -124,6 +143,46 @@ async function callGemini(body) {
     }
   }
 
+  // 2) If model is experiencing temporary high demand (503 / 429), retry with backoff + failover to backup models!
+  if (!attempt.ok && isOverloadedError(attempt.status, attempt.data?.error?.message)) {
+    await sleep(900);
+    attempt = await rawGenerate(apiKey, getGeminiConfig().model, body);
+
+    if (!attempt.ok && isOverloadedError(attempt.status, attempt.data?.error?.message)) {
+      try {
+        const available = cachedModelsList || (await listGeminiModels());
+        // Rank lightweight/flash variants first, excluding image/tts/embedding-only models
+        const candidates = available
+          .filter(
+            (m) =>
+              m !== model &&
+              !m.includes('tts') &&
+              !m.includes('image') &&
+              !m.includes('vision') &&
+              !m.includes('computer-use')
+          )
+          .sort((a, b) => {
+            const score = (x) => (x.includes('flash-lite') ? 0 : x.includes('flash') ? 1 : x.includes('pro') ? 2 : 3);
+            return score(a) - score(b);
+          })
+          .slice(0, 4);
+
+        for (const backupModel of candidates) {
+          const backupAttempt = await rawGenerate(apiKey, backupModel, body);
+          if (backupAttempt.ok) {
+            return backupAttempt.data;
+          }
+        }
+      } catch {
+        // Keep original error if listing backup models fails
+      }
+      // One final retry after 1.5s on primary model
+      await sleep(1500);
+      attempt = await rawGenerate(apiKey, getGeminiConfig().model, body);
+    }
+  }
+
+  // 3) If model wasn't found (404 / deprecated), discover best active Flash model and retry
   if (!attempt.ok) {
     const errMsg = String(attempt.data?.error?.message || '');
     const isModelError =
@@ -134,14 +193,14 @@ async function callGemini(body) {
 
     if (isModelError) {
       try {
-        const available = await listGeminiModels();
+        const available = cachedModelsList || (await listGeminiModels());
         const fallback = pickBestFlashModel(available, model);
         if (fallback && fallback !== model) {
           setGeminiConfig({ model: fallback });
           attempt = await rawGenerate(apiKey, fallback, body);
         }
       } catch {
-        // Keep original error if listing models also fails
+        // Keep original error
       }
     }
   }
