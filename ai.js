@@ -10,9 +10,41 @@ const KEY_STORAGE = 'fitdespensa_gemini_key';
 const MODEL_STORAGE = 'fitdespensa_gemini_model';
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
+const RETIRED_EXACT = new Set([
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-001',
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-001',
+  'gemini-2.0-flash-lite',
+  'gemini-2.0-flash-lite-001',
+]);
+
 function isDeprecatedModel(name) {
   const m = String(name || '').toLowerCase().replace(/^models\//, '');
-  return m.startsWith('gemini-1.') || m.startsWith('gemini-2.0') || m.startsWith('gemini-2.5');
+  if (m.startsWith('gemini-1.')) return true;
+  return RETIRED_EXACT.has(m);
+}
+
+function isUsableTextModel(name) {
+  const m = String(name || '').toLowerCase().replace(/^models\//, '');
+  if (isDeprecatedModel(m)) return false;
+  if (!(m.startsWith('gemini-') || m.startsWith('gemma-3'))) return false;
+  const blocked = ['tts', 'image', 'embedding', 'aqa', 'vision', 'computer-use', 'robotics', 'audio', 'live', 'thinking-exp'];
+  return !blocked.some((b) => m.includes(b));
+}
+
+function rankModel(name) {
+  const m = name.toLowerCase();
+  if (m === 'gemini-3.8-flash') return 1;
+  if (m.includes('3.8') && m.includes('flash-lite')) return 2;
+  if (m.includes('3.') && m.includes('flash-lite')) return 3;
+  if (m.includes('3.') && m.includes('flash')) return 4;
+  if (m.includes('2.5-flash-lite')) return 5;
+  if (m.includes('3.') && m.includes('pro')) return 6;
+  if (m.includes('2.5-pro')) return 7;
+  if (m.includes('flash')) return 8;
+  if (m.includes('pro')) return 9;
+  return 10;
 }
 
 const memFallback = { key: '', model: DEFAULT_GEMINI_MODEL };
@@ -97,7 +129,8 @@ export async function listGeminiModels() {
   const list = allModels
     .filter((m) => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
     .map((m) => String(m.name || '').replace(/^models\//, ''))
-    .filter((name) => name.includes('gemini') && !isDeprecatedModel(name));
+    .filter(isUsableTextModel)
+    .sort((a, b) => rankModel(a) - rankModel(b));
   if (list.length) cachedModelsList = list;
   return list;
 }
@@ -159,73 +192,43 @@ async function callGemini(body) {
     }
   }
 
-  // 2) If model is experiencing temporary high demand (503 / 429), immediately fail over to gemini-3.8-flash-lite & active models!
-  if (!attempt.ok && isOverloadedError(attempt.status, attempt.data?.error?.message)) {
-    // First try known fast/available models directly without waiting
-    const directBackups = FALLBACK_CHAIN.filter((m) => m !== model);
-    for (const backupModel of directBackups) {
-      const backupAttempt = await rawGenerate(apiKey, backupModel, body);
+  // 2) If model is experiencing temporary high demand (503 / 429) or 404, sweep across ALL usable models on the account!
+  if (
+    !attempt.ok &&
+    (isOverloadedError(attempt.status, attempt.data?.error?.message) ||
+      attempt.status === 404 ||
+      String(attempt.data?.error?.message || '').toLowerCase().includes('no longer available') ||
+      String(attempt.data?.error?.message || '').toLowerCase().includes('not found'))
+  ) {
+    let pool = [];
+    try {
+      const available = cachedModelsList || (await listGeminiModels());
+      pool = available.filter((m) => m !== model);
+    } catch {
+      pool = FALLBACK_CHAIN.filter((m) => m !== model);
+    }
+
+    const tried = [model];
+    for (const candidateModel of pool.slice(0, 10)) {
+      tried.push(candidateModel);
+      // Gemma models don't support systemInstruction or tools; skip them if request uses tools/schema
+      if (candidateModel.startsWith('gemma-') && (body.tools || body.systemInstruction || body.generationConfig?.responseSchema)) {
+        continue;
+      }
+      const backupAttempt = await rawGenerate(apiKey, candidateModel, body);
       if (backupAttempt.ok) {
-        setGeminiConfig({ model: backupModel });
+        setGeminiConfig({ model: candidateModel });
         return backupAttempt.data;
       }
     }
 
-    // Next discover all active text/multimodal models on the account and try them
-    try {
-      const available = cachedModelsList || (await listGeminiModels());
-      const candidates = available
-        .filter(
-          (m) =>
-            m !== model &&
-            !directBackups.includes(m) &&
-            !m.includes('tts') &&
-            !m.includes('image') &&
-            !m.includes('embedding') &&
-            !m.includes('computer-use')
-        )
-        .sort((a, b) => {
-          const score = (x) => (x.includes('flash-lite') ? 0 : x.includes('flash') ? 1 : x.includes('pro') ? 2 : 3);
-          return score(a) - score(b);
-        })
-        .slice(0, 5);
-
-      for (const backupModel of candidates) {
-        const backupAttempt = await rawGenerate(apiKey, backupModel, body);
-        if (backupAttempt.ok) {
-          setGeminiConfig({ model: backupModel });
-          return backupAttempt.data;
-        }
-      }
-    } catch {
-      // Ignore listing error
-    }
-
-    // Final backoff retry
-    await sleep(1200);
+    // Final retry on primary after short pause
+    await sleep(1000);
     attempt = await rawGenerate(apiKey, getGeminiConfig().model, body);
-  }
-
-  // 3) If model wasn't found (404 / deprecated), discover best active Flash model and retry
-  if (!attempt.ok) {
-    const errMsg = String(attempt.data?.error?.message || '');
-    const isModelError =
-      attempt.status === 404 ||
-      errMsg.toLowerCase().includes('no longer available') ||
-      errMsg.toLowerCase().includes('not found') ||
-      errMsg.toLowerCase().includes('not supported');
-
-    if (isModelError) {
-      try {
-        const available = cachedModelsList || (await listGeminiModels());
-        const fallback = pickBestFlashModel(available, model);
-        if (fallback && fallback !== model) {
-          setGeminiConfig({ model: fallback });
-          attempt = await rawGenerate(apiKey, fallback, body);
-        }
-      } catch {
-        // Keep original error
-      }
+    if (!attempt.ok && isOverloadedError(attempt.status, attempt.data?.error?.message)) {
+      throw new Error(
+        `Tu API Key ya quedó guardada y es válida, pero los servidores de Google tienen alta demanda en este momento (probados: ${tried.slice(0, 5).join(', ')}). Espera 1 minuto y vuelve a intentar.`
+      );
     }
   }
 

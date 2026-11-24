@@ -30,7 +30,7 @@ import {
   recognizeProduct,
   runCoachTurn,
   setGeminiConfig,
-} from './ai.js?v=18';
+} from './ai.js?v=19';
 import {
   esc,
   formatCoachText,
@@ -1156,6 +1156,11 @@ function bindEvents() {
     } catch (err) {
       renderAll();
       const msg = String(err.message || err);
+      if (msg.includes('Tu API Key ya quedó guardada')) {
+        out.innerHTML = `<strong style="color:var(--warn)">⚠️ Clave guardada correctamente:</strong> ${esc(msg)}`;
+        toast('Clave guardada (Google con alta demanda temporal)');
+        return;
+      }
       let hint = 'Verifica que copiaste la clave completa (empieza con <code>AIza...</code>) desde Google AI Studio.';
       if (msg.toLowerCase().includes('referer') || msg.toLowerCase().includes('blocked')) {
         hint = 'Tu clave tiene restricciones de sitio web en Google Cloud/AI Studio. Quita las restricciones de HTTP Referrer o agrega <code>https://derekdgv-boop.github.io/*</code>.';
