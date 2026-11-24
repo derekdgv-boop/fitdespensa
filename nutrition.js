@@ -56,18 +56,52 @@ export const hasNutrition = (it) =>
 
 /** Macros available in stock (servings in stock × per-serving values). */
 export function pantryTotals(items) {
-  const t = { kcal: 0, protein: 0, carbs: 0, fat: 0, withData: 0, missing: 0 };
+  const t = { kcal: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, withData: 0, missing: 0 };
   for (const it of items) {
     if (hasNutrition(it)) {
       const servings = it.qty * it.servingsPerUnit;
       MACROS.forEach((m) => { t[m] += servings * (Number(it[m]) || 0); });
+      t.fiber += servings * (Number(it.fiber) || 0);
       t.withData++;
     } else if (isFood(it)) {
       t.missing++;
     }
   }
   MACROS.forEach((m) => { t[m] = Math.round(t[m]); });
+  t.fiber = Math.round(t.fiber);
   return t;
+}
+
+/** Breakdown of macro subtypes available across the entire pantry inventory. */
+export function pantrySubtypeBreakdown(items) {
+  const b = {
+    protein: { animal: 0, vegetal: 0, suplemento: 0 },
+    carbs: { complejo: 0, simple: 0, fibroso: 0, fiber: 0, sugar: 0 },
+    fat: { unsat: 0, sat: 0 },
+  };
+  for (const it of items) {
+    if (!hasNutrition(it) || it.qty <= 0) continue;
+    const servings = it.qty * it.servingsPerUnit;
+    const p = servings * (Number(it.protein) || 0);
+    const pt = ['animal', 'vegetal', 'suplemento'].includes(it.proteinType) ? it.proteinType : 'animal';
+    b.protein[pt] += p;
+
+    const c = servings * (Number(it.carbs) || 0);
+    const ct = ['complejo', 'simple', 'fibroso'].includes(it.carbType) ? it.carbType : 'complejo';
+    b.carbs[ct] += c;
+    b.carbs.fiber += servings * (Number(it.fiber) || 0);
+    b.carbs.sugar += servings * (Number(it.sugar) || 0);
+
+    const f = servings * (Number(it.fat) || 0);
+    const sat = servings * (Number(it.satFat) || 0);
+    const unsat = it.unsatFat != null && it.unsatFat !== '' ? servings * (Number(it.unsatFat) || 0) : Math.max(0, f - sat);
+    b.fat.sat += sat;
+    b.fat.unsat += unsat;
+  }
+  Object.keys(b.protein).forEach((k) => { b.protein[k] = Math.round(b.protein[k]); });
+  Object.keys(b.carbs).forEach((k) => { b.carbs[k] = Math.round(b.carbs[k]); });
+  Object.keys(b.fat).forEach((k) => { b.fat[k] = Math.round(b.fat[k]); });
+  return b;
 }
 
 export function coverageDays(totals, targets) {

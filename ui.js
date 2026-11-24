@@ -1,5 +1,5 @@
-// ui.js — Pro rendering templates for FitDespensa views.
-import { CATEGORIES, MEALS } from './constants.js';
+// ui.js — Pure inventory & AI recommendations rendering templates for FitDespensa.
+import { CATEGORIES } from './constants.js?v=13';
 import {
   STATUS_LABEL,
   catIcon,
@@ -9,26 +9,14 @@ import {
   sortItems,
   statusOf,
   toBuy,
-} from './inventory.js';
+} from './inventory.js?v=13';
 import {
-  MACRO_INFO,
-  addDays,
   calcTargets,
   coverageDays,
   hasNutrition,
-  logTotals,
-  macroSubtypeBreakdown,
+  pantrySubtypeBreakdown,
   pantryTotals,
-  todayStr,
-  waterGoalMl,
-} from './nutrition.js?v=11';
-
-export const SUPPLEMENTS = [
-  { id: 'creatina', label: 'Creatina 5g', match: 'creatina' },
-  { id: 'whey', label: 'Proteína whey', match: 'whey' },
-  { id: 'omega3', label: 'Omega-3', match: 'omega' },
-  { id: 'electrolitos', label: 'Electrolitos', match: 'electrolito' },
-];
+} from './nutrition.js?v=13';
 
 export const esc = (s) =>
   String(s ?? '')
@@ -38,7 +26,6 @@ export const esc = (s) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
-/** Safe markdown-lite for Coach IA replies (**bold** and bullet lines). */
 export function formatCoachText(raw) {
   return esc(raw)
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
@@ -46,13 +33,14 @@ export function formatCoachText(raw) {
 }
 
 const SVG_EDIT = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>`;
-const SVG_FORK = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2M7 2v20M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>`;
-const SVG_TRASH = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`;
+const SVG_CART = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></svg>`;
 const SVG_CHECK = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`;
-const SVG_STAR = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
+
+const PROT_LABELS = { animal: 'Animal', vegetal: 'Vegetal', suplemento: 'Supl.' };
+const CARB_LABELS = { complejo: 'Complejo', simple: 'Simple', fibroso: 'Fibroso' };
 
 // =========================================================================
-// PANTRY-FIRST OVERVIEW STRIP (Top of Mi Despensa — Home)
+// 1) PANTRY OVERVIEW STRIP (Top of Mi Despensa)
 // =========================================================================
 export function renderPantryOverview({ items, profile }) {
   const targets = calcTargets(profile);
@@ -73,313 +61,166 @@ export function renderPantryOverview({ items, profile }) {
       <span class="live-pill-val" style="color:var(--primary)">${cov?.protein != null ? `${cov.protein.toFixed(1)} días` : `${totals.protein} g`}</span>
       <div class="progress-track"><div class="progress-fill" style="width:${weeklyPct}%"></div></div>
     </button>
-    <button type="button" class="live-pill" data-action="go-catalog">
+    <button type="button" class="live-pill" data-action="toggle-quality">
       <span class="live-pill-label">Stock total</span>
       <span class="live-pill-val">${items.length} prod.</span>
-      <span class="live-pill-sub num">${totals.kcal.toLocaleString('es-MX')} kcal disponibles</span>
+      <span class="live-pill-sub num">${totals.kcal.toLocaleString('es-MX')} kcal · ${totals.fiber}g fibra</span>
     </button>
     <button type="button" class="live-pill" style="border-color:rgba(163,230,53,0.35); background:var(--primary-soft);" data-action="new-item">
-      <span class="live-pill-label" style="color:var(--primary)">Agregar rápido</span>
+      <span class="live-pill-label" style="color:var(--primary)">Subir producto</span>
       <span class="live-pill-val" style="color:var(--primary)">📷 Foto / Código</span>
       <span class="live-pill-sub">Autocompleta tabla nutrimental</span>
     </button>
   `;
 }
 
-// =========================================================================
-// 0) LIVE TELEMETRY STRIP (Top of Coach IA — Pantry-first)
-// =========================================================================
-export function renderLiveStrip({ items, profile, todayLogs, waterMl = 0, streak = 0, trainingDay = false }) {
-  const targets = calcTargets(profile, { trainingDay });
+export function renderLiveStrip({ items, profile }) {
+  const targets = calcTargets(profile);
   const totals = pantryTotals(items);
   const cov = coverageDays(totals, targets);
-  const eaten = logTotals(todayLogs);
   const lowCount = items.filter(inShoppingList).length;
   const weeklyPct = cov?.protein != null ? Math.min(100, Math.round((cov.protein / 7) * 100)) : 0;
 
   return `
     <button type="button" class="live-pill" data-action="go-catalog">
-      <span class="live-pill-label">Despensa</span>
-      <span class="live-pill-val" style="color:var(--primary)">${cov?.protein != null ? `${cov.protein.toFixed(1)} días P` : `${items.length} prod.`}</span>
+      <span class="live-pill-label">Reserva proteína</span>
+      <span class="live-pill-val" style="color:var(--primary)">${cov?.protein != null ? `${cov.protein.toFixed(1)} días` : `${totals.protein} g`}</span>
       <div class="progress-track"><div class="progress-fill" style="width:${weeklyPct}%"></div></div>
     </button>
     <button type="button" class="live-pill" data-action="go-shopping">
-      <span class="live-pill-label">Por comprar</span>
+      <span class="live-pill-label">Lista de compras</span>
       <span class="live-pill-val" style="color:${lowCount ? 'var(--accent)' : 'var(--ok)'}">${lowCount}</span>
-      <span class="live-pill-sub">${lowCount ? 'artículos bajos' : 'todo surtido'}</span>
+      <span class="live-pill-sub">${lowCount ? 'faltan por surtir' : 'despensa completa'}</span>
     </button>
-    <button type="button" class="live-pill" data-action="go-diary">
-      <span class="live-pill-label">Consumido hoy</span>
-      <span class="live-pill-val">${Math.round(eaten.protein)}g P · ${Math.round(eaten.kcal)} kcal</span>
-      <span class="live-pill-sub">${streak > 0 ? `Racha ${streak}d 🔥` : 'Ver diario'}</span>
+    <button type="button" class="live-pill" data-action="go-catalog">
+      <span class="live-pill-label">En inventario</span>
+      <span class="live-pill-val">${items.length} prod.</span>
+      <span class="live-pill-sub num">${totals.kcal.toLocaleString('es-MX')} kcal totales</span>
     </button>
-    <button type="button" class="live-pill" data-action="add-water-quick" title="Toca para sumar 250 ml">
-      <span class="live-pill-label">Agua (+250 ml)</span>
-      <span class="live-pill-val" style="color:var(--blue)">${(waterMl / 1000).toFixed(2)} L</span>
-      <span class="live-pill-sub">Toque rápido</span>
+    <button type="button" class="live-pill" data-action="open-settings">
+      <span class="live-pill-label">Objetivo fitness</span>
+      <span class="live-pill-val">${targets ? esc(targets.goal.label) : 'Configurar'}</span>
+      <span class="live-pill-sub">${targets ? `${targets.protein}g P/día` : 'Toca para definir'}</span>
     </button>
   `;
 }
 
 // =========================================================================
-// RECIPES GRID
+// 2) PANTRY MACRO SUBTYPE BREAKDOWN (In-stock nutrition quality)
 // =========================================================================
-export function renderRecipes(recipes) {
-  if (!recipes.length) {
-    return `
-      <div class="empty-state" style="grid-column: 1 / -1">
-        <h3>Aún no tienes recetas guardadas</h3>
-        <p>Pídele al Coach IA que guarde tus comidas ya hechas como receta, o toca la estrella en cualquier comida de tu Diario.</p>
-        <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
-          <button type="button" class="btn btn-primary btn-sm" data-action="go-coach">Pedir al Coach IA</button>
-          <button type="button" class="btn btn-ghost btn-sm" data-action="new-recipe">+ Crear manual</button>
+export function renderPantryQuality(items) {
+  const totals = pantryTotals(items);
+  const sub = pantrySubtypeBreakdown(items);
+
+  const segBar = (segments) => {
+    const sum = segments.reduce((a, s) => a + s.val, 0);
+    if (!sum) return `<div class="seg-track"></div>`;
+    return `<div class="seg-track">${segments
+      .filter((s) => s.val > 0)
+      .map((s) => `<div class="seg-part" style="width:${(s.val / sum) * 100}%; background:${s.color}" title="${s.label}: ${s.val}g"></div>`)
+      .join('')}</div>`;
+  };
+
+  return `
+    <div class="subtype-grid">
+      <div class="subtype-col">
+        <div class="subtype-head"><strong>Proteína en stock</strong><span class="num">${totals.protein}g</span></div>
+        ${segBar([
+          { label: 'Animal', val: sub.protein.animal, color: 'var(--primary)' },
+          { label: 'Vegetal', val: sub.protein.vegetal, color: '#34d399' },
+          { label: 'Suplemento', val: sub.protein.suplemento, color: '#a78bfa' },
+        ])}
+        <div class="subtype-legend num">
+          <span><i style="background:var(--primary)"></i>Animal ${sub.protein.animal}g</span>
+          <span><i style="background:#34d399"></i>Vegetal ${sub.protein.vegetal}g</span>
+          <span><i style="background:#a78bfa"></i>Supl. ${sub.protein.suplemento}g</span>
         </div>
       </div>
-    `;
-  }
 
-  return recipes
-    .map((r) => {
-      const mealObj = MEALS.find((m) => m.id === r.meal) || MEALS[1];
-      const media = r.photo
-        ? `<img src="${r.photo}" alt="${esc(r.name)}" loading="lazy" />`
-        : `<span style="font-size:2.4rem;">${mealObj.icon}</span>`;
-      const ingText = r.ingredients?.length ? r.ingredients.join(' · ') : r.steps || 'Sin ingredientes detallados';
+      <div class="subtype-col">
+        <div class="subtype-head"><strong>Carbohidratos en stock</strong><span class="num">${totals.carbs}g</span></div>
+        ${segBar([
+          { label: 'Complejos', val: sub.carbs.complejo, color: 'var(--blue)' },
+          { label: 'Fibrosos', val: sub.carbs.fibroso, color: '#22c55e' },
+          { label: 'Simples', val: sub.carbs.simple, color: 'var(--accent)' },
+        ])}
+        <div class="subtype-legend num">
+          <span><i style="background:var(--blue)"></i>Complejos ${sub.carbs.complejo}g</span>
+          <span><i style="background:#22c55e"></i>Fibrosos ${sub.carbs.fibroso}g</span>
+          <span><i style="background:var(--accent)"></i>Simples ${sub.carbs.simple}g</span>
+        </div>
+        <div class="muted small-note num">Fibra disponible: <strong>${sub.carbs.fiber}g</strong> · Azúcares: <strong>${sub.carbs.sugar}g</strong></div>
+      </div>
 
+      <div class="subtype-col">
+        <div class="subtype-head"><strong>Grasas en stock</strong><span class="num">${totals.fat}g</span></div>
+        ${segBar([
+          { label: 'Saludables', val: sub.fat.unsat, color: '#facc15' },
+          { label: 'Saturadas', val: sub.fat.sat, color: 'var(--danger)' },
+        ])}
+        <div class="subtype-legend num">
+          <span><i style="background:#facc15"></i>Saludables ${sub.fat.unsat}g</span>
+          <span><i style="background:var(--danger)"></i>Saturadas ${sub.fat.sat}g</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// =========================================================================
+// 3) AI RECOMMENDATIONS PANEL
+// =========================================================================
+export function renderAiRecommendations(data, addedNames = new Set()) {
+  if (!data) return '';
+  const insightsHtml = (data.insights || [])
+    .map(
+      (ins) => `
+        <div class="rec-insight-box">
+          <span class="macro-tag prot" style="align-self:flex-start;">${esc(ins.badge)}</span>
+          <strong>${esc(ins.title)}</strong>
+          <p>${esc(ins.detail)}</p>
+        </div>
+      `
+    )
+    .join('');
+
+  const buysHtml = (data.suggestedPurchases || [])
+    .map((b, idx) => {
+      const key = normText(b.name);
+      const alreadyAdded = addedNames.has(key);
       return `
-        <article class="recipe-card">
-          <div class="recipe-media">
-            ${media}
-            <span class="recipe-meal-badge">${esc(mealObj.label)}</span>
+        <div class="rec-buy-row">
+          <div style="flex:1; min-width:0;">
+            <strong style="font-size:0.86rem; display:block;">${esc(b.name)} · <span class="num">${b.qty} ${esc(b.unit)}</span></strong>
+            <span class="muted small-note">${esc(b.reason)}</span>
           </div>
-          <div class="recipe-body">
-            <h3 class="item-name">${esc(r.name)}</h3>
-            <div class="macro-tags">
-              <span class="macro-tag prot">${r.protein}g PRO</span>
-              <span class="macro-tag kcal">${r.kcal} kcal</span>
-              ${r.carbs ? `<span class="macro-tag">C ${r.carbs}g</span>` : ''}
-              ${r.fat ? `<span class="macro-tag">G ${r.fat}g</span>` : ''}
-            </div>
-            <div class="recipe-ing">${esc(ingText)}</div>
-            <div class="recipe-footer">
-              <button type="button" class="btn btn-primary btn-sm flex-1" data-action="eat-recipe" data-id="${esc(r.id)}">
-                ${SVG_FORK}
-                <span>Comí esto</span>
-              </button>
-              <button type="button" class="icon-btn icon-btn-sm" data-action="edit-recipe" data-id="${esc(r.id)}" title="Editar receta">${SVG_EDIT}</button>
-              <button type="button" class="icon-btn icon-btn-sm" data-action="delete-recipe" data-id="${esc(r.id)}" title="Eliminar receta">${SVG_TRASH}</button>
-            </div>
-          </div>
-        </article>
+          <button type="button" class="btn ${alreadyAdded ? 'btn-ghost' : 'btn-primary'} btn-xs"
+            data-action="add-rec-buy" data-idx="${idx}" ${alreadyAdded ? 'disabled' : ''}>
+            ${alreadyAdded ? '✓ En compras' : '+ A compras'}
+          </button>
+        </div>
       `;
     })
     .join('');
-}
-
-function renderRing(label, value, target, unit, color) {
-  const r = 39;
-  const circ = 2 * Math.PI * r;
-  const pct = target > 0 ? Math.min(1, value / target) : 0;
-  const offset = circ * (1 - pct);
-  const pctLabel = target > 0 ? `${Math.round((value / target) * 100)}% de meta` : 'Configura tu perfil';
 
   return `
-    <div class="ring-box">
-      <div class="ring-wrap">
-        <svg class="ring-svg" viewBox="0 0 98 98" aria-hidden="true">
-          <circle class="ring-track" cx="49" cy="49" r="${r}"></circle>
-          <circle class="ring-fill" cx="49" cy="49" r="${r}"
-            stroke="${color}"
-            stroke-dasharray="${circ.toFixed(1)}"
-            stroke-dashoffset="${offset.toFixed(1)}"></circle>
-        </svg>
-        <div class="ring-center">
-          <span class="ring-val">${Math.round(value)}</span>
-          <span class="ring-unit">${target > 0 ? `/ ${target} ${unit}` : unit}</span>
-        </div>
-      </div>
-      <strong style="font-size:0.86rem;">${label}</strong>
-      <span class="muted" style="font-size:0.72rem;">${pctLabel}</span>
-    </div>
+    <div class="recs-headline">✨ ${esc(data.headline || '')}</div>
+    <div class="recs-insights-grid">${insightsHtml}</div>
+    ${
+      buysHtml
+        ? `
+          <div>
+            <span class="eyebrow" style="display:block; margin-bottom:8px;">Sugeridos para tu lista de compras (1 toque)</span>
+            <div class="recs-buys-list">${buysHtml}</div>
+          </div>
+        `
+        : ''
+    }
   `;
 }
 
 // =========================================================================
-// 1) PANEL (Bento Dashboard)
-// =========================================================================
-export function renderPanel({ items, profile, todayLogs }) {
-  const targets = calcTargets(profile);
-  const totals = pantryTotals(items);
-  const cov = coverageDays(totals, targets);
-  const eaten = logTotals(todayLogs);
-  const lowItems = items.filter(inShoppingList).sort(sortItems);
-
-  const topProtein = [...items]
-    .filter((it) => it.qty > 0 && Number(it.protein) > 0)
-    .sort((a, b) => Number(b.protein) - Number(a.protein))
-    .slice(0, 4);
-
-  const profileBanner = !targets
-    ? `
-      <div class="banner banner-accent">
-        <div>
-          <strong>Personaliza tus metas fitness</strong>
-          <p class="muted small-note">Ingresa tu peso, estatura y objetivo para calcular tu proteína diaria y los días que cubre tu despensa.</p>
-        </div>
-        <button type="button" class="btn btn-primary btn-sm" data-action="open-settings">Configurar perfil</button>
-      </div>
-    `
-    : '';
-
-  const daysText = cov?.protein != null ? `${cov.protein.toFixed(1)} días` : `${totals.protein} g`;
-  const weeklyPct = cov?.protein != null ? Math.min(100, Math.round((cov.protein / 7) * 100)) : 0;
-
-  const carbsPct = targets?.carbs > 0 ? Math.min(100, Math.round((eaten.carbs / targets.carbs) * 100)) : 0;
-  const fatPct = targets?.fat > 0 ? Math.min(100, Math.round((eaten.fat / targets.fat) * 100)) : 0;
-
-  const alertsHtml = lowItems.length
-    ? lowItems
-        .slice(0, 5)
-        .map((it) => {
-          const st = statusOf(it);
-          const thumb = it.photo ? `<img src="${it.photo}" alt="" />` : catIcon(it.category);
-          return `
-            <div class="data-row">
-              <div class="row-thumb">${thumb}</div>
-              <div class="row-info">
-                <span class="row-title">${esc(it.name)}</span>
-                <span class="row-sub num">${round(it.qty, 2)} / mín ${it.min} ${esc(it.unit)}</span>
-              </div>
-              <span class="status-pill status-${st}">${STATUS_LABEL[st]}</span>
-              <button type="button" class="btn btn-ghost btn-xs" data-action="mark-bought" data-id="${esc(it.id)}" title="Marcar comprado">${SVG_CHECK}</button>
-            </div>
-          `;
-        })
-        .join('')
-    : `<p class="muted small-note">Tu despensa está al día. No hay artículos por debajo de su mínimo.</p>`;
-
-  const topProteinHtml = topProtein.length
-    ? topProtein
-        .map((it) => {
-          const thumb = it.photo ? `<img src="${it.photo}" alt="" />` : catIcon(it.category);
-          return `
-            <div class="data-row">
-              <div class="row-thumb">${thumb}</div>
-              <div class="row-info">
-                <span class="row-title">${esc(it.name)}</span>
-                <span class="row-sub">${esc(it.serving || '1 porción')} · ${round(it.qty, 2)} ${esc(it.unit)} disp.</span>
-              </div>
-              <span class="macro-tag prot">${it.protein}g PRO</span>
-              <button type="button" class="btn btn-ghost btn-xs" data-action="quick-log" data-id="${esc(it.id)}" title="Registrar en diario">${SVG_FORK}</button>
-            </div>
-          `;
-        })
-        .join('')
-    : `<p class="muted small-note">Agrega información nutrimental a tus productos para ver tus mejores fuentes de proteína.</p>`;
-
-  return `
-    ${profileBanner}
-    <div class="bento-top">
-      <div class="card hero-card">
-        <div>
-          <span class="eyebrow">Cobertura de proteína en despensa</span>
-          <div class="kpi-big">${daysText}</div>
-          <p class="muted small-note">
-            ${
-              cov?.protein != null
-                ? `Tienes ${totals.protein.toLocaleString('es-MX')} g de proteína en casa frente a tu meta de ${targets.protein} g/día.`
-                : 'Proteína total disponible en tu inventario actual.'
-            }
-          </p>
-        </div>
-
-        ${
-          cov?.protein != null
-            ? `
-              <div class="weekly-bar-wrap">
-                <div class="weekly-bar-head">
-                  <span>Reserva semanal (7 días)</span>
-                  <strong class="num">${weeklyPct}%</strong>
-                </div>
-                <div class="progress-track">
-                  <div class="progress-fill" style="width:${weeklyPct}%"></div>
-                </div>
-              </div>
-            `
-            : ''
-        }
-
-        <div class="stat-strip">
-          <div class="stat-cell">
-            <span>Energía en stock</span>
-            <strong>${totals.kcal.toLocaleString('es-MX')} kcal</strong>
-          </div>
-          <div class="stat-cell">
-            <span>Productos</span>
-            <strong>${items.length}</strong>
-          </div>
-          <div class="stat-cell">
-            <span>Por comprar</span>
-            <strong style="color:${lowItems.length ? 'var(--accent)' : 'var(--ok)'}">${lowItems.length}</strong>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h3 class="card-title">Progreso de hoy</h3>
-            <span class="muted small-note">${targets ? `Objetivo: ${targets.goal.label}` : 'Sin objetivo configurado'}</span>
-          </div>
-          <button type="button" class="btn btn-ghost btn-xs" data-action="go-diary">Abrir diario</button>
-        </div>
-
-        <div class="rings-row">
-          ${renderRing('Proteína', eaten.protein, targets?.protein || 0, 'g', 'var(--primary)')}
-          ${renderRing('Calorías', eaten.kcal, targets?.kcal || 0, 'kcal', 'var(--accent)')}
-        </div>
-
-        <div class="mini-macro-row">
-          <div>
-            <div class="weekly-bar-head" style="margin-bottom:5px;">
-              <span>Carbohidratos</span>
-              <strong class="num">${Math.round(eaten.carbs)}${targets ? `/${targets.carbs}g` : 'g'}</strong>
-            </div>
-            <div class="progress-track"><div class="progress-fill carbs" style="width:${carbsPct}%"></div></div>
-          </div>
-          <div>
-            <div class="weekly-bar-head" style="margin-bottom:5px;">
-              <span>Grasas</span>
-              <strong class="num">${Math.round(eaten.fat)}${targets ? `/${targets.fat}g` : 'g'}</strong>
-            </div>
-            <div class="progress-track"><div class="progress-fill fat" style="width:${fatPct}%"></div></div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="bento-bottom">
-      <div class="card">
-        <div class="card-head">
-          <h3 class="card-title">Alertas de reposición (${lowItems.length})</h3>
-          <button type="button" class="btn btn-ghost btn-xs" data-action="go-shopping">Ver lista</button>
-        </div>
-        <div class="list-stack">${alertsHtml}</div>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <h3 class="card-title">Top proteína disponible</h3>
-          <button type="button" class="btn btn-ghost btn-xs" data-action="go-coach">Ideas con Coach IA</button>
-        </div>
-        <div class="list-stack">${topProteinHtml}</div>
-      </div>
-    </div>
-  `;
-}
-
-// =========================================================================
-// 2) CATÁLOGO
+// 4) CATÁLOGO DE DESPENSA
 // =========================================================================
 export function renderCategoryChips(activeCategory, items) {
   const counts = new Map();
@@ -410,9 +251,9 @@ export function renderCatalog({ items, search, category, stockFilter, viewMode }
     return `
       <div class="empty-state" style="grid-column: 1 / -1">
         <h3>Tu despensa está vacía</h3>
-        <p>Agrega tus productos con foto y macros, o carga un catálogo fitness de ejemplo para explorar la app.</p>
+        <p>Toma foto de tus productos para autocompletar su tabla nutrimental, o carga la despensa fitness de ejemplo.</p>
         <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
-          <button type="button" class="btn btn-primary btn-sm" data-action="new-item">Agregar producto</button>
+          <button type="button" class="btn btn-primary btn-sm" data-action="new-item">+ Agregar producto</button>
           <button type="button" class="btn btn-ghost btn-sm" data-action="seed-sample">Cargar ejemplo fitness</button>
         </div>
       </div>
@@ -436,19 +277,24 @@ export function renderCatalog({ items, search, category, stockFilter, viewMode }
         ? `<img src="${it.photo}" alt="${esc(it.name)}" loading="lazy" />`
         : `<span class="item-fallback-ico" aria-hidden="true">${catIcon(it.category)}</span>`;
 
+      const inCart = inShoppingList(it);
+      const pSubtype = it.protein > 0 ? ` · ${PROT_LABELS[it.proteinType] || 'Animal'}` : '';
+      const cSubtype = it.carbs > 0 ? ` · ${CARB_LABELS[it.carbType] || 'Complejo'}` : '';
+
       const macros = hasNutrition(it)
         ? `
           <div class="macro-tags">
-            ${it.protein != null ? `<span class="macro-tag prot">${it.protein}g PRO</span>` : ''}
+            ${it.protein != null ? `<span class="macro-tag prot">${it.protein}g P${pSubtype}</span>` : ''}
+            ${it.carbs != null && it.carbs > 0 ? `<span class="macro-tag">${it.carbs}g C${cSubtype}</span>` : ''}
+            ${it.fiber != null && it.fiber > 0 ? `<span class="macro-tag">${it.fiber}g fibra</span>` : ''}
             ${it.kcal != null ? `<span class="macro-tag kcal">${it.kcal} kcal</span>` : ''}
-            ${it.serving ? `<span class="macro-tag">${esc(it.serving)}</span>` : ''}
           </div>
         `
         : '';
 
       return `
         <article class="item-card" data-id="${esc(it.id)}">
-          <div class="item-media" data-action="edit-item" data-id="${esc(it.id)}" title="Ver o editar producto">
+          <div class="item-media" data-action="edit-item" data-id="${esc(it.id)}" title="Ver tabla nutrimental o editar">
             ${media}
             <span class="status-pill status-${st}">${STATUS_LABEL[st]}</span>
             <span class="media-edit-chip" aria-hidden="true">${SVG_EDIT}</span>
@@ -459,7 +305,9 @@ export function renderCatalog({ items, search, category, stockFilter, viewMode }
                 <h3 class="item-name">${esc(it.name)}</h3>
                 <span class="item-cat">${esc(it.category)} · mín ${it.min} ${esc(it.unit)}</span>
               </div>
-              <button type="button" class="icon-btn icon-btn-sm" data-action="quick-log" data-id="${esc(it.id)}" title="Registrar en diario">${SVG_FORK}</button>
+              <button type="button" class="icon-btn icon-btn-sm cart-toggle-btn ${inCart ? 'active' : ''}"
+                data-action="toggle-cart" data-id="${esc(it.id)}"
+                title="${inCart ? 'Ya está en lista de compras' : 'Enviar a lista de compras'}">${SVG_CART}</button>
             </div>
             ${macros}
             ${viewMode === 'grid' ? `<div class="stock-bar"><div class="stock-fill fill-${st}" style="width:${ratio}%"></div></div>` : ''}
@@ -479,347 +327,7 @@ export function renderCatalog({ items, search, category, stockFilter, viewMode }
 }
 
 // =========================================================================
-// 3) DIARIO DE COMIDAS
-// =========================================================================
-export function formatDateHeading(dateStr) {
-  const today = todayStr();
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const dt = new Date(y, m - 1, d);
-  const formatted = dt.toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' });
-  const label = dateStr === today ? 'Hoy' : formatted.charAt(0).toUpperCase() + formatted.slice(1);
-  return { label, sub: dateStr };
-}
-
-export function renderDiarySummary(entries, profile, { waterMl = 0, streak = 0, recipes = [], items = [], dayMeta = {} } = {}) {
-  const trainingDay = Boolean(dayMeta?.trainingDay);
-  const doneSupps = new Set(dayMeta?.supplements || []);
-  const totals = logTotals(entries);
-  const sub = macroSubtypeBreakdown(entries);
-  const targets = calcTargets(profile, { trainingDay });
-
-  const segBar = (segments) => {
-    const sum = segments.reduce((a, s) => a + s.val, 0);
-    if (!sum) return `<div class="seg-track"></div>`;
-    return `<div class="seg-track">${segments
-      .filter((s) => s.val > 0)
-      .map((s) => `<div class="seg-part" style="width:${(s.val / sum) * 100}%; background:${s.color}" title="${s.label}: ${s.val}g"></div>`)
-      .join('')}</div>`;
-  };
-
-  const breakdownCard = `
-    <div class="card subtype-card">
-      <div class="card-head" style="margin-bottom:10px;">
-        <div>
-          <h3 class="card-title">Desglose por tipo de macros</h3>
-          <span class="muted small-note">Calidad de tus proteínas, carbohidratos y grasas hoy</span>
-        </div>
-        ${sub.sodium > 0 ? `<span class="macro-tag">Sodio ${sub.sodium} mg</span>` : ''}
-      </div>
-      <div class="subtype-grid">
-        <div class="subtype-col">
-          <div class="subtype-head"><strong>Proteína</strong><span class="num">${Math.round(totals.protein)}g</span></div>
-          ${segBar([
-            { label: 'Animal', val: sub.protein.animal, color: 'var(--primary)' },
-            { label: 'Vegetal', val: sub.protein.vegetal, color: '#34d399' },
-            { label: 'Suplemento', val: sub.protein.suplemento, color: '#a78bfa' },
-          ])}
-          <div class="subtype-legend num">
-            <span><i style="background:var(--primary)"></i>Animal ${sub.protein.animal}g</span>
-            <span><i style="background:#34d399"></i>Vegetal ${sub.protein.vegetal}g</span>
-            <span><i style="background:#a78bfa"></i>Supl. ${sub.protein.suplemento}g</span>
-          </div>
-        </div>
-
-        <div class="subtype-col">
-          <div class="subtype-head"><strong>Carbohidratos</strong><span class="num">${Math.round(totals.carbs)}g</span></div>
-          ${segBar([
-            { label: 'Complejos', val: sub.carbs.complejo, color: 'var(--blue)' },
-            { label: 'Fibrosos', val: sub.carbs.fibroso, color: '#22c55e' },
-            { label: 'Simples', val: sub.carbs.simple, color: 'var(--accent)' },
-          ])}
-          <div class="subtype-legend num">
-            <span><i style="background:var(--blue)"></i>Complejos ${sub.carbs.complejo}g</span>
-            <span><i style="background:#22c55e"></i>Fibrosos ${sub.carbs.fibroso}g</span>
-            <span><i style="background:var(--accent)"></i>Simples ${sub.carbs.simple}g</span>
-          </div>
-          <div class="muted small-note num">Fibra: <strong>${sub.carbs.fiber}g</strong> / 30g · Azúcares: <strong>${sub.carbs.sugar}g</strong></div>
-        </div>
-
-        <div class="subtype-col">
-          <div class="subtype-head"><strong>Grasas</strong><span class="num">${Math.round(totals.fat)}g</span></div>
-          ${segBar([
-            { label: 'Saludables', val: sub.fat.unsat, color: '#facc15' },
-            { label: 'Saturadas', val: sub.fat.sat, color: 'var(--danger)' },
-          ])}
-          <div class="subtype-legend num">
-            <span><i style="background:#facc15"></i>Saludables ${sub.fat.unsat}g</span>
-            <span><i style="background:var(--danger)"></i>Saturadas ${sub.fat.sat}g</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-
-  // Cal AI / MacroFactor Hero Calorie Ring
-  const kcalTarget = targets?.kcal || 0;
-  const kcalRemaining = kcalTarget > 0 ? Math.max(0, Math.round(kcalTarget - totals.kcal)) : Math.round(totals.kcal);
-  const kcalOver = kcalTarget > 0 && totals.kcal > kcalTarget ? Math.round(totals.kcal - kcalTarget) : 0;
-  const r = 52;
-  const circ = 2 * Math.PI * r;
-  const pct = kcalTarget > 0 ? Math.min(1, totals.kcal / kcalTarget) : 0;
-  const offset = circ * (1 - pct);
-
-  const macroRow = (key, cls) => {
-    const info = MACRO_INFO[key];
-    const val = Math.round(totals[key]);
-    const tgt = targets?.[key] || 0;
-    const mpct = tgt > 0 ? Math.min(100, Math.round((val / tgt) * 100)) : 0;
-    const rem = tgt > 0 ? Math.max(0, Math.round(tgt - val)) : null;
-    return `
-      <div class="hero-macro-row">
-        <div class="hero-macro-head">
-          <strong>${info.label}</strong>
-          <span class="num"><strong>${val}</strong>${tgt ? ` / ${tgt}g` : 'g'}${rem != null ? ` · <span class="muted">faltan ${rem}g</span>` : ''}</span>
-        </div>
-        <div class="progress-track"><div class="progress-fill ${cls}" style="width:${mpct}%"></div></div>
-      </div>
-    `;
-  };
-
-  // Dynamic Water Goal based on body weight + training day
-  const wGoal = waterGoalMl(profile, trainingDay);
-  const totalGlasses = Math.max(8, Math.min(16, Math.round(wGoal / 250)));
-  const glassesFilled = Math.min(totalGlasses, Math.floor(waterMl / 250));
-  const glassesHtml = Array.from({ length: totalGlasses }, (_, idx) => {
-    const filled = idx < glassesFilled;
-    const targetMl = (idx + 1) * 250;
-    return `<button type="button" class="water-drop ${filled ? 'filled' : ''}" data-action="set-water" data-ml="${targetMl}" title="${targetMl} ml" aria-label="${targetMl} ml">💧</button>`;
-  }).join('');
-
-  // Daily Supplements Checklist
-  const suppHtml = SUPPLEMENTS.map((s) => {
-    const checked = doneSupps.has(s.id);
-    return `<button type="button" class="supp-pill ${checked ? 'done' : ''}" data-action="toggle-supp" data-supp="${s.id}">${checked ? '✓ ' : '+ '}${esc(s.label)}</button>`;
-  }).join('');
-
-  // Quick-log chips (saved recipes + top protein pantry items)
-  const quickChips = [
-    ...recipes.slice(0, 4).map(
-      (rec) => `<button type="button" class="quick-chip recipe" data-action="eat-recipe" data-id="${esc(rec.id)}">★ ${esc(rec.name)} · ${rec.protein}g P</button>`
-    ),
-    ...items
-      .filter((it) => it.qty > 0 && Number(it.protein) >= 5)
-      .sort((a, b) => Number(b.protein) - Number(a.protein))
-      .slice(0, 5)
-      .map(
-        (it) => `<button type="button" class="quick-chip" data-action="quick-eat-item" data-id="${esc(it.id)}">+ ${esc(it.name)} · ${it.protein}g P</button>`
-      ),
-  ].join('');
-
-  return `
-    <div class="diary-hero card">
-      <div class="diary-hero-left">
-        <div class="cal-ring-wrap">
-          <svg class="cal-ring-svg" viewBox="0 0 124 124" aria-hidden="true">
-            <circle class="ring-track" cx="62" cy="62" r="${r}"></circle>
-            <circle class="ring-fill" cx="62" cy="62" r="${r}"
-              stroke="${kcalOver ? 'var(--danger)' : 'var(--primary)'}"
-              stroke-dasharray="${circ.toFixed(1)}"
-              stroke-dashoffset="${offset.toFixed(1)}"></circle>
-          </svg>
-          <div class="ring-center">
-            <span class="cal-ring-num num">${kcalOver ? `+${kcalOver}` : kcalRemaining}</span>
-            <span class="ring-unit">${kcalTarget ? (kcalOver ? 'kcal extra' : 'kcal restantes') : 'kcal hoy'}</span>
-          </div>
-        </div>
-        <div class="diary-hero-meta">
-          <span class="num">${Math.round(totals.kcal)} consumidas${kcalTarget ? ` · meta ${kcalTarget}` : ''}</span>
-          <div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:center;">
-            ${streak > 0 ? `<span class="streak-pill">🔥 ${streak}d</span>` : ''}
-            <button type="button" class="train-toggle ${trainingDay ? 'active' : ''}" data-action="toggle-training">
-              ${trainingDay ? '💪 Día de entreno (+200 kcal)' : '🛋️ Día de descanso'}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div class="diary-hero-right">
-        ${macroRow('protein', '')}
-        ${macroRow('carbs', 'carbs')}
-        ${macroRow('fat', 'fat')}
-      </div>
-    </div>
-
-    ${breakdownCard}
-
-    <div class="water-card card">
-      <div class="water-head">
-        <div>
-          <strong>💧 Hidratación</strong>
-          <span class="muted small-note num"> · ${(waterMl / 1000).toFixed(2)} / ${(wGoal / 1000).toFixed(2)} L</span>
-        </div>
-        <div style="display:flex; gap:6px;">
-          <button type="button" class="btn btn-ghost btn-xs" data-action="step-water" data-dir="-250">−250 ml</button>
-          <button type="button" class="btn btn-primary btn-xs" data-action="step-water" data-dir="250">+250 ml</button>
-        </div>
-      </div>
-      <div class="water-drops" style="grid-template-columns: repeat(${Math.min(totalGlasses, 10)}, 1fr);">${glassesHtml}</div>
-      <div class="supp-bar">
-        <span class="muted small-note" style="font-weight:600;">Suplementos:</span>
-        ${suppHtml}
-      </div>
-    </div>
-
-    ${
-      quickChips
-        ? `
-          <div class="quick-log-wrap">
-            <span class="eyebrow">Registro rápido (1 toque)</span>
-            <div class="quick-log-strip">${quickChips}</div>
-          </div>
-        `
-        : ''
-    }
-  `;
-}
-
-// =========================================================================
-// PROGRESO (Peso corporal + Tendencia 7d + Adherencia semanal)
-// =========================================================================
-export function renderProgress({ weights = [], allLogs = [], profile }) {
-  const targets = calcTargets(profile);
-  const last7Weights = weights.slice(-7);
-  const avg7 = last7Weights.length
-    ? (last7Weights.reduce((s, w) => s + w.kg, 0) / last7Weights.length).toFixed(1)
-    : null;
-  const latest = weights[weights.length - 1];
-  const prev = weights.length >= 2 ? weights[weights.length - 2] : null;
-  const delta = latest && prev ? (latest.kg - prev.kg).toFixed(1) : null;
-
-  // Weight SVG sparkline (last 14 entries)
-  const pts = weights.slice(-14);
-  let weightSvg = `<p class="muted small-note">Registra tu peso al menos 2 días para ver tu curva de tendencia.</p>`;
-  if (pts.length >= 2) {
-    const minW = Math.min(...pts.map((p) => p.kg)) - 0.5;
-    const maxW = Math.max(...pts.map((p) => p.kg)) + 0.5;
-    const range = Math.max(0.5, maxW - minW);
-    const W = 360;
-    const H = 110;
-    const coords = pts.map((p, i) => {
-      const x = 14 + (i / (pts.length - 1)) * (W - 28);
-      const y = H - 18 - ((p.kg - minW) / range) * (H - 34);
-      return { x, y, kg: p.kg, date: p.date };
-    });
-    const pathD = coords.map((c, i) => `${i === 0 ? 'M' : 'L'}${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
-    const circles = coords
-      .map((c) => `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="3.8" fill="var(--primary)"><title>${c.date}: ${c.kg} kg</title></circle>`)
-      .join('');
-    weightSvg = `
-      <svg class="trend-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-        <path d="${pathD}" fill="none" stroke="var(--primary)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" />
-        ${circles}
-      </svg>
-    `;
-  }
-
-  // Last 7 days adherence bars (protein vs target)
-  const today = todayStr();
-  const days = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6));
-  const barsHtml = days
-    .map((d) => {
-      const dayEntries = allLogs.filter((e) => e.date === d);
-      const t = logTotals(dayEntries);
-      const pTarget = targets?.protein || 120;
-      const pct = Math.min(100, Math.round((t.protein / pTarget) * 100));
-      const dt = new Date(d + 'T12:00:00');
-      const dow = dt.toLocaleDateString('es-MX', { weekday: 'short' }).slice(0, 3);
-      const cls = pct >= 85 ? 'good' : pct >= 40 ? 'mid' : 'low';
-      return `
-        <div class="adh-col" title="${d}: ${Math.round(t.protein)}g PRO · ${Math.round(t.kcal)} kcal">
-          <span class="adh-val num">${t.protein ? `${Math.round(t.protein)}g` : '—'}</span>
-          <div class="adh-track"><div class="adh-fill ${cls}" style="height:${Math.max(4, pct)}%"></div></div>
-          <span class="adh-day">${dow}</span>
-        </div>
-      `;
-    })
-    .join('');
-
-  return `
-    <div class="bento-bottom">
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h3 class="card-title">Peso corporal y tendencia</h3>
-            <span class="muted small-note">${avg7 ? `Promedio 7 días: ${avg7} kg` : 'Registra tu peso de hoy'}</span>
-          </div>
-          ${
-            latest
-              ? `<span class="macro-tag prot">${latest.kg} kg${delta != null ? ` (${Number(delta) > 0 ? '+' : ''}${delta})` : ''}</span>`
-              : ''
-          }
-        </div>
-        <form id="weightForm" class="inline-row" style="margin-bottom:14px;">
-          <input type="number" id="weightInput" step="0.1" min="30" max="250" placeholder="Ej. 74.8 kg" value="${latest ? latest.kg : profile?.weight || ''}" style="padding:8px 11px; border-radius:10px; border:1px solid var(--border); background:var(--bg-2);" />
-          <button type="submit" class="btn btn-primary btn-sm">Guardar hoy</button>
-        </form>
-        ${weightSvg}
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <h3 class="card-title">Adherencia de proteína (7 días)</h3>
-            <span class="muted small-note">${targets ? `Meta diaria: ${targets.protein} g proteína` : 'Configura tu perfil para tu meta exacta'}</span>
-          </div>
-        </div>
-        <div class="adh-chart">${barsHtml}</div>
-      </div>
-    </div>
-  `;
-}
-
-export function renderDiaryMeals(entries) {
-  return MEALS.map((meal) => {
-    const list = entries.filter((e) => (e.meal || 'snack') === meal.id);
-    const sub = logTotals(list);
-    const rows = list.length
-      ? list
-          .map(
-            (e) => `
-              <div class="log-row">
-                <div>
-                  <strong style="font-size:0.9rem;">${esc(e.name)}</strong>
-                  <div class="muted small-note num">
-                    ${round(e.servings, 2)} porc. · ${Math.round(e.kcal || 0)} kcal · P ${round(e.protein || 0, 1)}g · C ${round(e.carbs || 0, 1)}g · G ${round(e.fat || 0, 1)}g
-                  </div>
-                </div>
-                <div style="display:flex; gap:6px;">
-                  <button type="button" class="icon-btn icon-btn-sm" data-action="save-log-recipe" data-id="${esc(e.id)}" title="Guardar como receta">${SVG_STAR}</button>
-                  <button type="button" class="icon-btn icon-btn-sm" data-action="delete-log" data-id="${esc(e.id)}" title="Eliminar registro">${SVG_TRASH}</button>
-                </div>
-              </div>
-            `
-          )
-          .join('')
-      : `<p class="muted small-note" style="padding:2px 0;">Sin alimentos registrados aquí todavía.</p>`;
-
-    return `
-      <div class="card meal-group">
-        <div class="card-head" style="margin-bottom:${list.length ? '10px' : '4px'};">
-          <div>
-            <h3 class="card-title">${meal.icon} ${meal.label}</h3>
-            <span class="muted small-note num">${list.length ? `${Math.round(sub.kcal)} kcal · ${round(sub.protein, 1)}g proteína` : '0 kcal'}</span>
-          </div>
-          <button type="button" class="btn btn-ghost btn-xs" data-action="open-log-meal" data-meal="${meal.id}">+ Agregar</button>
-        </div>
-        ${rows}
-      </div>
-    `;
-  }).join('');
-}
-
-// =========================================================================
-// 4) LISTA DE COMPRAS
+// 5) LISTA DE COMPRAS
 // =========================================================================
 export function renderShoppingList(items) {
   const list = items.filter(inShoppingList).sort(sortItems);
@@ -827,7 +335,7 @@ export function renderShoppingList(items) {
     return `
       <div class="empty-state">
         <h3>Tu despensa está surtida</h3>
-        <p>En cuanto algún producto baje de su mínimo de alerta aparecerá aquí automáticamente.</p>
+        <p>Cuando un producto baje de su mínimo aparecerá aquí. También puedes pulsar «✨ Sugerir compras con IA» arriba.</p>
       </div>
     `;
   }
@@ -843,7 +351,7 @@ export function renderShoppingList(items) {
           <div class="row-info">
             <span class="row-title">${esc(it.name)}</span>
             <span class="row-sub num">
-              Stock: ${round(it.qty, 2)} ${esc(it.unit)} (mín ${it.min}) · Sugerido comprar <strong>${buy} ${esc(it.unit)}</strong>
+              Tienes ${round(it.qty, 2)} ${esc(it.unit)} (mín ${it.min}) · Comprar <strong>${buy} ${esc(it.unit)}</strong>
             </span>
           </div>
           <span class="status-pill status-${st}">${STATUS_LABEL[st]}</span>

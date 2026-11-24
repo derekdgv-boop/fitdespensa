@@ -8,17 +8,17 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="FitDespensa" />
   <link rel="manifest" href="manifest.json" />
-  <title>FitDespensa · Coach IA, Recetas & Despensa</title>
-  <meta name="description" content="Habla o manda foto a tu Coach IA para subir comidas, guardar recetas y controlar tu despensa fitness." />
+  <title>FitDespensa · Inventario Fitness Inteligente con IA</title>
+  <meta name="description" content="Controla el inventario de tu despensa fitness con fotos, tablas nutrimentales automáticas y recomendaciones de IA." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23a3e635'/%3E%3Cpath d='M18 4 7 18h8l-1 10 11-14h-8l1-10z' fill='%230a1204'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="style.css?v=12" />
+  <link rel="stylesheet" href="style.css?v=13" />
 </head>
 <body>
   <div class="app-layout">
-    <!-- Desktop Sidebar (4 clear tabs) -->
+    <!-- Desktop Sidebar (3 laser-focused inventory tabs) -->
     <aside class="sidebar" aria-label="Navegación principal">
       <div class="sidebar-brand">
         <div class="brand-mark" aria-hidden="true">
@@ -32,7 +32,7 @@
 
       <button type="button" class="btn btn-primary sidebar-cta" id="sidebarAddBtn">
         <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-        <span>Nuevo producto</span>
+        <span>Agregar producto</span>
       </button>
 
       <nav class="nav-list" role="tablist">
@@ -42,29 +42,25 @@
         </button>
         <button class="nav-item" data-tab="shopping" role="tab" aria-selected="false">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></svg>
-          <span>Compras</span>
+          <span>Lista de compras</span>
           <span class="nav-badge hidden" id="shoppingBadge">0</span>
         </button>
         <button class="nav-item" data-tab="coach" role="tab" aria-selected="false">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/></svg>
-          <span>Coach IA</span>
-        </button>
-        <button class="nav-item" data-tab="diary" role="tab" aria-selected="false">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2M7 2v20M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>
-          <span>Diario y Recetas</span>
+          <span>Asistente IA</span>
         </button>
       </nav>
 
       <div class="sidebar-footer">
         <div class="sidebar-mini-card">
-          <span class="mini-label">Cobertura despensa</span>
+          <span class="mini-label">Reserva de proteína</span>
           <strong class="mini-metric" id="sidebarCoverageVal">—</strong>
         </div>
         <div class="sidebar-tools">
           <button class="icon-btn" id="themeBtn" type="button" title="Cambiar tema" aria-label="Cambiar tema"></button>
           <button class="btn btn-ghost btn-sm flex-1" id="settingsBtn" type="button">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
-            <span>Perfil y Ajustes</span>
+            <span>Meta y Ajustes</span>
           </button>
         </div>
       </div>
@@ -84,161 +80,67 @@
           </div>
         </div>
         <div class="header-actions">
-          <button class="btn btn-primary btn-xs" id="mobileAddBtn" type="button" aria-label="Nuevo producto">
+          <button class="btn btn-primary btn-xs" id="mobileAddBtn" type="button" aria-label="Agregar producto">
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-            <span>Producto</span>
+            <span>Agregar</span>
           </button>
           <button class="icon-btn" id="themeBtnMobile" type="button" aria-label="Cambiar tema"></button>
-          <button class="icon-btn" id="settingsBtnMobile" type="button" aria-label="Perfil y Ajustes">
+          <button class="icon-btn" id="settingsBtnMobile" type="button" aria-label="Meta y Ajustes">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
           </button>
         </div>
       </header>
 
       <main class="main">
-        <!-- 1. COACH IA (Asistente de Despensa y Fitness) -->
-        <section class="view" id="view-coach">
-          <!-- Compact Live Telemetry Strip -->
-          <div id="liveSummaryStrip" class="live-strip"></div>
-
-          <div id="coachKeyBanner" class="banner banner-warn hidden">
-            <div>
-              <strong>Activa tu Coach IA con Gemini</strong>
-              <p class="muted small-note">Pega tu API Key gratuita en Ajustes para hablar, mandar fotos de tus comidas y guardar recetas automáticamente.</p>
-            </div>
-            <button type="button" class="btn btn-primary btn-sm" id="openSettingsFromCoach">Configurar clave</button>
-          </div>
-
-          <div class="coach-shell coach-home">
-            <div class="coach-topbar">
-              <div class="coach-title-row">
-                <div class="ai-avatar">
-                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/></svg>
-                </div>
-                <div>
-                  <strong style="font-size:0.95rem;">Coach IA</strong>
-                  <div class="muted" style="font-size:0.74rem;" id="coachStatusSub">Manda texto, voz o foto de tu comida</div>
-                </div>
-              </div>
-              <button type="button" class="btn btn-ghost btn-xs" id="clearChatBtn">Limpiar chat</button>
-            </div>
-
-            <div class="chat-messages" id="chatMessages" aria-live="polite"></div>
-
-            <!-- Interactive Quick Prompts (Pantry-first) -->
-            <div class="coach-prompts" id="coachSuggestions">
-              <button type="button" class="prompt-pill" data-prompt="¿Qué me falta comprar esta semana según mis mínimos de despensa?">¿Qué me falta comprar?</button>
-              <button type="button" class="prompt-pill" data-prompt="¿Para cuántos días me alcanza la proteína que tengo en casa ahora mismo?">Días de proteína en casa</button>
-              <button type="button" class="prompt-pill" data-prompt="¿Qué puedo cocinar alto en proteína usando solo lo que tengo en mi despensa?">¿Qué cocino con lo que tengo?</button>
-              <button type="button" class="prompt-pill" data-prompt="Compré 2 kg de pechuga de pollo y 12 huevos, agrégalo a mi despensa">Sumar compras del súper</button>
-            </div>
-
-            <!-- Pending Photo Attachment Preview with 2 quick athlete modes -->
-            <div class="chat-attach-bar hidden" id="chatAttachBar">
-              <img id="chatAttachPreview" alt="Foto adjunta" />
-              <div class="flex-1" style="min-width:0;">
-                <strong style="font-size:0.8rem; display:block;">¿Qué hacemos con esta foto?</strong>
-                <div style="display:flex; gap:6px; margin-top:5px; flex-wrap:wrap;">
-                  <button type="button" class="btn btn-primary btn-xs" id="sendPhotoAsMealBtn">🍽️ Subir comida</button>
-                  <button type="button" class="btn btn-ghost btn-xs" id="sendPhotoAsPantryBtn">📦 Subir a despensa</button>
-                </div>
-              </div>
-              <button type="button" class="icon-btn icon-btn-sm" id="removeChatPhotoBtn" aria-label="Quitar foto">✕</button>
-            </div>
-
-            <!-- Conversational Composer: Photo + Voice + Text + Send -->
-            <form class="chat-form" id="chatForm">
-              <button type="button" class="icon-btn" id="chatPhotoBtn" title="Enviar foto de comida o producto" aria-label="Enviar foto">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-              </button>
-              <button type="button" class="icon-btn" id="chatVoiceBtn" title="Dictar por voz" aria-label="Dictar por voz">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
-              </button>
-              <input type="file" id="chatPhotoInput" accept="image/*" capture="environment" class="hidden" />
-              <input type="text" id="chatInput" class="chat-input" placeholder="Ej. «Comí pollo con arroz» o manda foto…" autocomplete="off" />
-              <button type="submit" class="btn btn-primary" id="chatSendBtn" aria-label="Enviar">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
-              </button>
-            </form>
-          </div>
-        </section>
-
-        <!-- 2. COMIDAS Y RECETAS -->
-        <section class="view" id="view-diary">
-          <div class="page-head">
-            <div>
-              <h1 class="page-title">Comidas y Recetas</h1>
-              <p class="page-sub">Lleva tu diario y guarda tus platillos favoritos para registrarlos en 1 toque</p>
-            </div>
-            <div class="page-actions">
-              <div class="segmented" role="tablist" aria-label="Subsección de comidas">
-                <button type="button" class="seg-btn active" data-meals-sub="today">Diario</button>
-                <button type="button" class="seg-btn" data-meals-sub="recipes">Recetas <span id="recipesCountBadge" class="muted"></span></button>
-                <button type="button" class="seg-btn" data-meals-sub="progress">Progreso</button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Subvista A: Diario -->
-          <div id="subview-today">
-            <div class="subbar">
-              <div class="date-stepper">
-                <button type="button" class="icon-btn icon-btn-sm" id="prevDayBtn" aria-label="Día anterior">
-                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg>
-                </button>
-                <div class="date-pill">
-                  <strong id="diaryDateLabel">Hoy</strong>
-                  <span id="diaryDateSub" class="muted"></span>
-                </div>
-                <button type="button" class="icon-btn icon-btn-sm" id="nextDayBtn" aria-label="Día siguiente">
-                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m9 18 6-6-6-6"/></svg>
-                </button>
-              </div>
-              <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                <button type="button" class="btn btn-ghost btn-sm" id="copyYesterdayBtn">Copiar ayer</button>
-                <button type="button" class="btn btn-primary btn-sm" id="addLogBtn">+ Registrar comida</button>
-              </div>
-            </div>
-            <div id="diarySummary"></div>
-            <div id="diaryMeals"></div>
-          </div>
-
-          <!-- Subvista B: Mis Recetas -->
-          <div id="subview-recipes" class="hidden">
-            <div class="subbar">
-              <p class="muted small-note">Toca <strong>Comí esto</strong> para registrar la receta y descontar ingredientes coincidentes de tu despensa.</p>
-              <button type="button" class="btn btn-primary btn-sm" id="newRecipeBtn">+ Nueva receta</button>
-            </div>
-            <div id="recipesList" class="recipes-grid"></div>
-          </div>
-
-          <!-- Subvista C: Progreso (Peso + Tendencia + Adherencia 7d) -->
-          <div id="subview-progress" class="hidden">
-            <div id="progressContent"></div>
-          </div>
-        </section>
-
-        <!-- 3. DESPENSA (Pantalla Principal) -->
+        <!-- 1. MI DESPENSA (100% Inventory Home) -->
         <section class="view active" id="view-catalog">
           <div class="page-head">
             <div>
               <h1 class="page-title">Mi Despensa</h1>
-              <p class="page-sub">Controla qué tienes en casa, sube fotos con tabla nutrimental automática y sabe cuándo comprar</p>
+              <p class="page-sub">Inventario del hogar con fotos, tablas nutrimentales automáticas y alertas de compra</p>
             </div>
             <div class="page-actions">
+              <button type="button" class="btn btn-ghost btn-sm" id="askRecsBtn">✨ Recomendaciones IA</button>
               <button type="button" class="btn btn-primary btn-sm" id="catalogAddBtn">+ Agregar producto</button>
             </div>
           </div>
 
-          <!-- Pantry-First KPI Overview Strip -->
+          <!-- Pantry KPI Overview Strip -->
           <div id="pantryOverviewStrip" class="live-strip"></div>
+
+          <!-- AI Recommendations Panel (Interactive cards + 1-tap add to shopping) -->
+          <div id="pantryAiRecsBox" class="ai-recs-card card">
+            <div class="ai-recs-header">
+              <div class="coach-title-row">
+                <div class="ai-avatar" style="width:34px; height:34px; border-radius:10px;">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/></svg>
+                </div>
+                <div>
+                  <h2 class="card-title">Recomendaciones IA para tu despensa</h2>
+                  <span class="muted small-note">Analiza tus existencias, tipos de proteína/carbos y qué te conviene comprar</span>
+                </div>
+              </div>
+              <div class="recs-btn-group">
+                <button type="button" class="btn btn-primary btn-xs" data-rec-focus="general">⚖️ Analizar despensa</button>
+                <button type="button" class="btn btn-ghost btn-xs" data-rec-focus="shopping">🛒 Qué comprar</button>
+                <button type="button" class="btn btn-ghost btn-xs" data-rec-focus="meals">🍳 Ideas con mi stock</button>
+              </div>
+            </div>
+            <div id="aiRecsBody" class="ai-recs-body hidden"></div>
+          </div>
+
+          <!-- Collapsible Pantry Macro Subtype Breakdown -->
+          <details class="pantry-quality-details" id="pantryQualityDetails">
+            <summary>📊 Ver balance nutricional disponible en tu despensa (tipos de proteína, carbos y grasas)</summary>
+            <div id="pantryQualityContent" style="margin-top:12px;"></div>
+          </details>
 
           <div class="toolbar">
             <div class="search-wrap">
               <svg class="search-ico" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
               <input type="search" id="searchInput" class="search-input" placeholder="Buscar pollo, proteína, avena..." autocomplete="off" />
             </div>
-            <div class="segmented" role="group" aria-label="Filtro rápido">
+            <div class="segmented" role="group" aria-label="Filtro de stock">
               <button type="button" class="seg-btn active" data-stock-filter="all">Todos</button>
               <button type="button" class="seg-btn" data-stock-filter="low">Por comprar</button>
               <button type="button" class="seg-btn" data-stock-filter="out">Agotados</button>
@@ -257,24 +159,86 @@
           <div id="catalogList" class="catalog-grid"></div>
         </section>
 
-        <!-- 4. LISTA DE COMPRAS -->
+        <!-- 2. LISTA DE COMPRAS -->
         <section class="view" id="view-shopping">
           <div class="page-head">
             <div>
               <h1 class="page-title">Lista de compras</h1>
-              <p class="page-sub" id="shoppingSubtitle">Generada automáticamente según tus mínimos de stock</p>
+              <p class="page-sub" id="shoppingSubtitle">Se actualiza sola cuando un producto llega o baja de su mínimo</p>
             </div>
             <div class="page-actions">
+              <button type="button" class="btn btn-primary btn-sm" id="aiSuggestShoppingBtn">✨ Sugerir compras con IA</button>
               <button type="button" class="btn btn-ghost btn-sm" id="copyListBtn">Copiar</button>
               <button type="button" class="btn btn-accent btn-sm" id="whatsappBtn">WhatsApp</button>
             </div>
           </div>
+          <div id="shoppingAiBox" class="hidden" style="margin-bottom:14px;"></div>
           <div id="shoppingList"></div>
+        </section>
+
+        <!-- 3. ASISTENTE IA DE INVENTARIO -->
+        <section class="view" id="view-coach">
+          <div id="liveSummaryStrip" class="live-strip"></div>
+
+          <div id="coachKeyBanner" class="banner banner-warn hidden">
+            <div>
+              <strong>Activa las recomendaciones de IA con Gemini</strong>
+              <p class="muted small-note">Pega tu API Key gratuita en Ajustes para autocompletar etiquetas con foto, recibir recomendaciones y actualizar tu despensa hablando.</p>
+            </div>
+            <button type="button" class="btn btn-primary btn-sm" id="openSettingsFromCoach">Configurar clave</button>
+          </div>
+
+          <div class="coach-shell coach-home">
+            <div class="coach-topbar">
+              <div class="coach-title-row">
+                <div class="ai-avatar">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/></svg>
+                </div>
+                <div>
+                  <strong style="font-size:0.95rem;">Asistente IA de Despensa</strong>
+                  <div class="muted" style="font-size:0.74rem;" id="coachStatusSub">Sube productos por foto/voz o pide recomendaciones</div>
+                </div>
+              </div>
+              <button type="button" class="btn btn-ghost btn-xs" id="clearChatBtn">Limpiar chat</button>
+            </div>
+
+            <div class="chat-messages" id="chatMessages" aria-live="polite"></div>
+
+            <div class="coach-prompts" id="coachSuggestions">
+              <button type="button" class="prompt-pill" data-prompt="Analiza mi despensa actual: ¿qué me recomiendas comprar para cumplir mi objetivo fitness y por qué?">¿Qué me recomiendas comprar?</button>
+              <button type="button" class="prompt-pill" data-prompt="¿Qué productos se me están acabando y para cuántos días me alcanza la proteína en casa?">Estado de mi stock</button>
+              <button type="button" class="prompt-pill" data-prompt="Revisa el balance de tipos de proteína, carbohidratos y grasas en mi despensa y dime qué falta">Balance nutricional</button>
+              <button type="button" class="prompt-pill" data-prompt="¿Qué platillos fitness rápidos puedo preparar usando únicamente lo que tengo disponible hoy?">Ideas con lo que tengo</button>
+            </div>
+
+            <div class="chat-attach-bar hidden" id="chatAttachBar">
+              <img id="chatAttachPreview" alt="Foto adjunta" />
+              <div class="flex-1" style="min-width:0;">
+                <strong style="font-size:0.8rem; display:block;">Foto de producto lista</strong>
+                <span class="muted" style="font-size:0.72rem;">Envíala para extraer su tabla nutrimental y guardarlo en tu despensa</span>
+              </div>
+              <button type="button" class="icon-btn icon-btn-sm" id="removeChatPhotoBtn" aria-label="Quitar foto">✕</button>
+            </div>
+
+            <form class="chat-form" id="chatForm">
+              <button type="button" class="icon-btn" id="chatPhotoBtn" title="Subir foto de producto" aria-label="Subir foto">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+              </button>
+              <button type="button" class="icon-btn" id="chatVoiceBtn" title="Dictar por voz" aria-label="Dictar por voz">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+              </button>
+              <input type="file" id="chatPhotoInput" accept="image/*" capture="environment" class="hidden" />
+              <input type="text" id="chatInput" class="chat-input" placeholder="Ej. «Se acabó la avena», «Compré 2 kg de pollo» o pide recomendaciones…" autocomplete="off" />
+              <button type="submit" class="btn btn-primary" id="chatSendBtn" aria-label="Enviar">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+              </button>
+            </form>
+          </div>
         </section>
       </main>
     </div>
 
-    <!-- Mobile Bottom Tab Bar (Pantry-first) -->
+    <!-- Mobile Bottom Tab Bar (3 clean tabs) -->
     <nav class="mobile-nav" role="tablist" aria-label="Navegación móvil">
       <button class="mnav-item active" data-tab="catalog" role="tab" aria-selected="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></svg>
@@ -287,11 +251,7 @@
       </button>
       <button class="mnav-item" data-tab="coach" role="tab" aria-selected="false">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/></svg>
-        <span>Coach IA</span>
-      </button>
-      <button class="mnav-item" data-tab="diary" role="tab" aria-selected="false">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2M7 2v20M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>
-        <span>Diario</span>
+        <span>Asistente IA</span>
       </button>
     </nav>
   </div>
@@ -348,14 +308,14 @@
         </div>
 
         <details class="nutrition-details" id="advancedItemDetails">
-          <summary>Categoría y alerta de reposición</summary>
+          <summary>Categoría y mínimo de alerta</summary>
           <div class="form-grid nutrition-grid">
             <label class="field">
               <span>Categoría</span>
               <select id="itemCategory"></select>
             </label>
             <label class="field">
-              <span>Mínimo de alerta</span>
+              <span>Avisarme cuando queden…</span>
               <input type="number" id="itemMin" step="any" min="0" required value="1" />
             </label>
           </div>
@@ -441,75 +401,6 @@
     </div>
   </div>
 
-  <!-- MODAL: Nueva / Editar Receta -->
-  <div class="modal-backdrop hidden" id="recipeModal" role="dialog" aria-modal="true" aria-labelledby="recipeModalTitle">
-    <div class="modal">
-      <div class="modal-header">
-        <h2 id="recipeModalTitle">Guardar receta</h2>
-        <button type="button" class="icon-btn icon-btn-sm" data-close-modal="recipeModal" aria-label="Cerrar">✕</button>
-      </div>
-      <form id="recipeForm" class="modal-body">
-        <input type="hidden" id="recipeId" />
-
-        <div class="photo-field">
-          <div class="photo-preview" id="recipePhotoPreview">
-            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6" class="muted"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-          </div>
-          <div class="photo-controls">
-            <div class="photo-btn-row">
-              <button type="button" class="btn btn-ghost btn-sm" id="recipePhotoBtn">Subir foto del platillo</button>
-              <button type="button" class="btn btn-ghost btn-sm hidden" id="removeRecipePhotoBtn">Quitar</button>
-            </div>
-            <span class="muted small-note">Opcional · se guarda comprimida con tu receta</span>
-          </div>
-          <input type="file" id="recipePhotoInput" accept="image/*" class="hidden" />
-        </div>
-
-        <div class="form-grid">
-          <label class="field span-2">
-            <span>Nombre de la receta *</span>
-            <input type="text" id="recipeName" required maxlength="80" placeholder="Ej. Bowl de pollo, arroz y aguacate" />
-          </label>
-          <label class="field span-2">
-            <span>Momento ideal</span>
-            <select id="recipeMeal"></select>
-          </label>
-          <label class="field">
-            <span>Calorías (kcal) *</span>
-            <input type="number" id="recipeKcal" step="any" min="0" required value="0" />
-          </label>
-          <label class="field">
-            <span>Proteína (g) *</span>
-            <input type="number" id="recipeProtein" step="any" min="0" required value="0" />
-          </label>
-          <label class="field">
-            <span>Carbohidratos (g)</span>
-            <input type="number" id="recipeCarbs" step="any" min="0" value="0" />
-          </label>
-          <label class="field">
-            <span>Grasas (g)</span>
-            <input type="number" id="recipeFat" step="any" min="0" value="0" />
-          </label>
-          <label class="field span-2">
-            <span>Ingredientes (uno por línea)</span>
-            <textarea id="recipeIngredients" rows="3" placeholder="150 g pechuga de pollo&#10;1 taza arroz integral&#10;1/2 aguacate"></textarea>
-          </label>
-          <label class="field span-2">
-            <span>Preparación (opcional)</span>
-            <textarea id="recipeSteps" rows="2" placeholder="Asar el pollo con especias y servir con arroz y aguacate."></textarea>
-          </label>
-        </div>
-
-        <div class="modal-footer">
-          <button type="button" class="btn btn-danger hidden" id="deleteRecipeBtn">Eliminar</button>
-          <div class="spacer"></div>
-          <button type="button" class="btn btn-ghost" data-close-modal="recipeModal">Cancelar</button>
-          <button type="submit" class="btn btn-primary">Guardar receta</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
   <!-- MODAL: Cámara Web -->
   <div class="modal-backdrop hidden" id="cameraModal" role="dialog" aria-modal="true" aria-labelledby="cameraModalTitle">
     <div class="modal modal-sm">
@@ -522,7 +413,7 @@
           <video id="cameraVideo" autoplay playsinline muted></video>
           <div class="viewfinder-guide" aria-hidden="true"></div>
         </div>
-        <p class="muted small-note center">Encuadra el producto o platillo dentro del marco.</p>
+        <p class="muted small-note center">Encuadra el producto o tabla nutrimental dentro del marco.</p>
         <div class="modal-footer">
           <button type="button" class="btn btn-ghost" id="cancelCameraBtn">Cancelar</button>
           <button type="button" class="btn btn-primary" id="capturePhotoBtn">Capturar foto</button>
@@ -531,121 +422,16 @@
     </div>
   </div>
 
-  <!-- MODAL: Armar Comida (Multi-alimentos + Escáner de plato IA) -->
-  <div class="modal-backdrop hidden" id="logModal" role="dialog" aria-modal="true" aria-labelledby="logModalTitle">
-    <div class="modal modal-lg">
-      <div class="modal-header">
-        <h2 id="logModalTitle">Armar comida (varios alimentos)</h2>
-        <button type="button" class="icon-btn icon-btn-sm" data-close-modal="logModal" aria-label="Cerrar">✕</button>
-      </div>
-      <form id="logForm" class="modal-body">
-        <div class="inline-row" style="align-items:flex-end; flex-wrap:wrap;">
-          <label class="field flex-1" style="min-width:160px;">
-            <span>Momento del día</span>
-            <select id="logMeal"></select>
-          </label>
-          <button type="button" class="btn btn-accent btn-sm" id="scanMealPhotoBtn">📷 Foto del plato (IA)</button>
-          <input type="file" id="mealPhotoInput" accept="image/*" capture="environment" class="hidden" />
-        </div>
-
-        <!-- Quick Search & 1-Tap Pantry Add -->
-        <div class="field">
-          <span>Toca productos de tu despensa para sumarlos a esta comida</span>
-          <input type="search" id="logPantrySearch" placeholder="Buscar pollo, huevo, arroz, avena..." autocomplete="off" />
-        </div>
-        <div class="pantry-picker-chips" id="logPantryChips"></div>
-
-        <!-- Live Meal Tray -->
-        <div class="tray-box">
-          <div class="tray-head">
-            <strong id="trayTitle">En esta comida (0 alimentos)</strong>
-            <span class="muted small-note num" id="trayTotals">0 kcal · 0g PRO</span>
-          </div>
-          <div id="logTrayList" class="tray-list"></div>
-        </div>
-
-        <!-- Manual Add Collapsible -->
-        <details class="nutrition-details" id="manualAddDetails">
-          <summary>+ Agregar alimento manual (fuera de despensa)</summary>
-          <div class="form-grid nutrition-grid">
-            <label class="field span-2">
-              <span>Nombre del alimento</span>
-              <input type="text" id="logManualName" maxlength="60" placeholder="Ej. Tortilla de maíz, tacos..." />
-            </label>
-            <label class="field">
-              <span>Kcal</span>
-              <input type="number" id="logManualKcal" step="any" min="0" placeholder="0" />
-            </label>
-            <label class="field">
-              <span>Proteína (g)</span>
-              <input type="number" id="logManualProtein" step="any" min="0" placeholder="0" />
-            </label>
-            <label class="field">
-              <span>Tipo proteína</span>
-              <select id="logManualProtType">
-                <option value="animal">Animal</option>
-                <option value="vegetal">Vegetal</option>
-                <option value="suplemento">Suplemento</option>
-              </select>
-            </label>
-            <label class="field">
-              <span>Carbos (g)</span>
-              <input type="number" id="logManualCarbs" step="any" min="0" placeholder="0" />
-            </label>
-            <label class="field">
-              <span>Tipo carbos</span>
-              <select id="logManualCarbType">
-                <option value="complejo">Complejos</option>
-                <option value="simple">Simples</option>
-                <option value="fibroso">Fibrosos</option>
-              </select>
-            </label>
-            <label class="field">
-              <span>Fibra (g)</span>
-              <input type="number" id="logManualFiber" step="any" min="0" placeholder="0" />
-            </label>
-            <label class="field">
-              <span>Grasas (g)</span>
-              <input type="number" id="logManualFat" step="any" min="0" placeholder="0" />
-            </label>
-            <label class="field">
-              <span>Grasa sat. (g)</span>
-              <input type="number" id="logManualSatFat" step="any" min="0" placeholder="0" />
-            </label>
-          </div>
-          <div style="margin-top:10px; display:flex; justify-content:flex-end;">
-            <button type="button" class="btn btn-ghost btn-sm" id="addManualToTrayBtn">+ Sumar al plato</button>
-          </div>
-        </details>
-
-        <label class="checkbox-row">
-          <input type="checkbox" id="logDeduct" checked />
-          <span>Descontar de la despensa los productos incluidos</span>
-        </label>
-        <label class="checkbox-row">
-          <input type="checkbox" id="logSaveAsRecipe" />
-          <span>Guardar también esta combinación en Mis Recetas</span>
-        </label>
-
-        <div class="modal-footer">
-          <div class="spacer"></div>
-          <button type="button" class="btn btn-ghost" data-close-modal="logModal">Cancelar</button>
-          <button type="submit" class="btn btn-primary" id="saveMealTrayBtn">Guardar comida</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <!-- MODAL: Perfil y Ajustes -->
+  <!-- MODAL: Meta Fitness y Ajustes -->
   <div class="modal-backdrop hidden" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
     <div class="modal modal-lg">
       <div class="modal-header">
-        <h2 id="settingsModalTitle">Perfil y ajustes</h2>
+        <h2 id="settingsModalTitle">Meta fitness y ajustes</h2>
         <button type="button" class="icon-btn icon-btn-sm" data-close-modal="settingsModal" aria-label="Cerrar">✕</button>
       </div>
       <div class="settings-tabs" role="tablist">
-        <button type="button" class="stab active" data-stab="ai">Coach IA (Gemini)</button>
-        <button type="button" class="stab" data-stab="profile">Perfil fitness</button>
+        <button type="button" class="stab active" data-stab="ai">IA (Gemini)</button>
+        <button type="button" class="stab" data-stab="profile">Meta fitness</button>
         <button type="button" class="stab" data-stab="sync">Datos y nube</button>
       </div>
       <div class="modal-body">
@@ -680,8 +466,9 @@
           </div>
         </form>
 
-        <!-- Tab 2: Perfil Fitness -->
+        <!-- Tab 2: Meta Fitness (calcula para cuántos días alcanza tu despensa) -->
         <form id="profileForm" class="stab-panel" data-stab-panel="profile">
+          <p class="muted small-note">Se usa para calcular cuántos días de proteína cubre tu inventario y personalizar las recomendaciones de compra.</p>
           <div class="form-grid">
             <label class="field">
               <span>Sexo</span>
@@ -712,7 +499,7 @@
             </label>
           </div>
           <div class="targets-preview" id="profileTargetsPreview">
-            Completa tus datos para calcular calorías y proteína diarias (Mifflin-St Jeor).
+            Completa tus datos para calcular tu meta diaria de proteína y calorías.
           </div>
           <details class="nutrition-details">
             <summary>Personalizar metas manualmente (opcional)</summary>
@@ -737,7 +524,7 @@
           </details>
           <div class="modal-footer">
             <div class="spacer"></div>
-            <button type="submit" class="btn btn-primary">Guardar perfil</button>
+            <button type="submit" class="btn btn-primary">Guardar meta</button>
           </div>
         </form>
 
@@ -757,7 +544,7 @@
           <div class="inline-row" style="justify-content:space-between; align-items:center;">
             <div>
               <strong>Catálogo fitness de ejemplo</strong>
-              <p class="muted small-note">Agrega 13 productos comunes con macros reales para probar la app.</p>
+              <p class="muted small-note">Agrega 13 productos comunes con tablas nutrimentales reales.</p>
             </div>
             <button type="button" class="btn btn-ghost btn-sm" id="seedDataBtn">Cargar ejemplo</button>
           </div>
@@ -769,6 +556,6 @@
   <!-- Toast Container -->
   <div class="toast-container" id="toastContainer" aria-live="polite"></div>
 
-  <script type="module" src="app.js?v=12"></script>
+  <script type="module" src="app.js?v=13"></script>
 </body>
 </html>

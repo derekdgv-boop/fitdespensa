@@ -1,7 +1,8 @@
-// ai.js — Gemini REST client for FitDespensa:
-// 1) Product photo recognition (structured JSON output)
-// 2) Fitness & pantry Coach IA with function calling (read & mutate inventory/log)
-import { CATEGORY_NAMES, MEAL_IDS, UNITS } from './constants.js';
+// ai.js — Gemini REST client for FitDespensa (100% Inventory + AI Recommendations):
+// 1) Automatic full nutrition table recognition from product/label photos
+// 2) Structured AI Pantry & Shopping Recommendations
+// 3) Conversational & Multimodal Inventory Coach IA (photo + voice + text)
+import { CATEGORY_NAMES, UNITS } from './constants.js?v=13';
 import { DEFAULT_GEMINI_MODEL } from './firebase-config.js?v=7';
 
 const KEY_STORAGE = 'fitdespensa_gemini_key';
@@ -60,8 +61,7 @@ export async function testGeminiConnection() {
   const res = await callGemini({
     contents: [{ role: 'user', parts: [{ text: 'Responde solo OK' }] }],
   });
-  const candidate = res?.candidates?.[0];
-  if (!candidate) {
+  if (!res?.candidates?.[0]) {
     throw new Error('Respuesta vacía de Gemini. Revisa el modelo seleccionado.');
   }
   return true;
@@ -82,7 +82,7 @@ export async function listGeminiModels() {
 }
 
 // =========================================================================
-// 1) Product photo scanner
+// 1) Product / Nutrition Label Photo Auto-Fill
 // =========================================================================
 const PRODUCT_SCHEMA = {
   type: 'OBJECT',
@@ -94,9 +94,9 @@ const PRODUCT_SCHEMA = {
     servingsPerUnit: { type: 'NUMBER', description: 'Cantidad aproximada de porciones por envase/unidad' },
     kcal: { type: 'NUMBER', description: 'Calorías por porción' },
     protein: { type: 'NUMBER', description: 'Gramos de proteína por porción' },
-    proteinType: { type: 'STRING', enum: ['animal', 'vegetal', 'suplemento'], description: 'Fuente principal de proteína' },
+    proteinType: { type: 'STRING', enum: ['animal', 'vegetal', 'suplemento'] },
     carbs: { type: 'NUMBER', description: 'Gramos totales de carbohidratos por porción' },
-    carbType: { type: 'STRING', enum: ['complejo', 'simple', 'fibroso'], description: 'Tipo principal de carbohidrato' },
+    carbType: { type: 'STRING', enum: ['complejo', 'simple', 'fibroso'] },
     fiber: { type: 'NUMBER', description: 'Gramos de fibra dietética por porción' },
     sugar: { type: 'NUMBER', description: 'Gramos de azúcares por porción' },
     fat: { type: 'NUMBER', description: 'Gramos totales de grasa por porción' },
@@ -122,15 +122,7 @@ export async function recognizeProduct(photoDataUrl) {
   ].join(' ');
 
   const res = await callGemini({
-    contents: [
-      {
-        role: 'user',
-        parts: [
-          { text: prompt },
-          { inlineData: { mimeType, data } },
-        ],
-      },
-    ],
+    contents: [{ role: 'user', parts: [{ text: prompt }, { inlineData: { mimeType, data } }] }],
     generationConfig: {
       responseMimeType: 'application/json',
       responseSchema: PRODUCT_SCHEMA,
@@ -143,132 +135,94 @@ export async function recognizeProduct(photoDataUrl) {
   return JSON.parse(text);
 }
 
-const MEAL_PHOTO_SCHEMA = {
+// =========================================================================
+// 2) Structured AI Inventory Recommendations
+// =========================================================================
+const RECOMMENDATIONS_SCHEMA = {
   type: 'OBJECT',
   properties: {
-    items: {
+    headline: { type: 'STRING', description: 'Diagnóstico breve y motivador de 1 línea sobre el estado actual de la despensa' },
+    insights: {
       type: 'ARRAY',
-      description: 'Lista de cada alimento individual visible en el plato o comida',
+      description: '3 recomendaciones accionables basadas en el inventario actual y objetivo fitness',
       items: {
         type: 'OBJECT',
         properties: {
-          name: { type: 'STRING', description: 'Nombre del alimento con porción estimada, ej. "Pechuga a la plancha (150 g)"' },
-          servings: { type: 'NUMBER', description: 'Porciones (normalmente 1)' },
-          kcal: { type: 'NUMBER' },
-          protein: { type: 'NUMBER' },
-          proteinType: { type: 'STRING', enum: ['animal', 'vegetal', 'suplemento'] },
-          carbs: { type: 'NUMBER' },
-          carbType: { type: 'STRING', enum: ['complejo', 'simple', 'fibroso'] },
-          fiber: { type: 'NUMBER' },
-          sugar: { type: 'NUMBER' },
-          fat: { type: 'NUMBER' },
-          satFat: { type: 'NUMBER' },
-          unsatFat: { type: 'NUMBER' },
-          sodium: { type: 'NUMBER' },
+          badge: { type: 'STRING', description: 'Etiqueta corta, ej. "Proteína", "Balance", "Ahorro", "Combinación"' },
+          title: { type: 'STRING', description: 'Título corto y directo' },
+          detail: { type: 'STRING', description: 'Explicación práctica de 1-2 oraciones usando los productos reales' },
         },
-        required: ['name', 'kcal', 'protein', 'carbs', 'fat'],
+        required: ['badge', 'title', 'detail'],
+      },
+    },
+    suggestedPurchases: {
+      type: 'ARRAY',
+      description: 'De 2 a 4 alimentos fitness recomendados para comprar que complementen lo que falta en la despensa',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          name: { type: 'STRING' },
+          category: { type: 'STRING', enum: CATEGORY_NAMES },
+          unit: { type: 'STRING', enum: UNITS },
+          qty: { type: 'NUMBER', description: 'Cantidad recomendada a comprar' },
+          reason: { type: 'STRING', description: 'Por qué conviene agregarlo según el objetivo y los macros actuales' },
+        },
+        required: ['name', 'category', 'unit', 'qty', 'reason'],
       },
     },
   },
-  required: ['items'],
+  required: ['headline', 'insights', 'suggestedPurchases'],
 };
 
-/** Detects ALL separate foods on a plated meal photo with detailed macro subtypes. */
-export async function recognizeMealPhoto(photoDataUrl) {
-  const match = String(photoDataUrl || '').match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
-  if (!match) throw new Error('Foto inválida para analizar.');
+export async function generatePantryRecommendations({ inventorySummary, focus = 'general' }) {
+  const focusMap = {
+    general: 'Analiza el balance general de la despensa, qué se está acabando, calidad de proteínas/carbos/grasas y qué conviene comprar.',
+    shopping: 'Enfócate en optimizar la próxima compra del súper según el objetivo fitness (definición/mantenimiento/volumen) y los huecos nutricionales.',
+    meals: 'Recomienda combinaciones rápidas y altas en proteína que se pueden preparar HOY usando únicamente lo que hay con stock > 0, y qué ingrediente clave falta.',
+  };
 
-  const [, mimeType, data] = match;
   const prompt = [
-    'Identifica CADA alimento por separado que aparece en esta foto de comida (por ejemplo: pollo, arroz, aguacate, ensalada).',
-    'Para cada alimento estima porción realista y sus macros completos: kcal, proteína + tipo (animal/vegetal/suplemento),',
-    'carbohidratos + tipo (complejo/simple/fibroso), fibra, azúcares, grasas totales, saturadas, insaturadas y sodio (mg).',
-  ].join(' ');
+    'Eres un experto en nutrición deportiva y gestión inteligente de despensa.',
+    focusMap[focus] || focusMap.general,
+    'Datos reales del inventario y perfil del usuario:',
+    JSON.stringify(inventorySummary),
+  ].join('\n');
 
   const res = await callGemini({
-    contents: [
-      {
-        role: 'user',
-        parts: [
-          { text: prompt },
-          { inlineData: { mimeType, data } },
-        ],
-      },
-    ],
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
     generationConfig: {
       responseMimeType: 'application/json',
-      responseSchema: MEAL_PHOTO_SCHEMA,
-      temperature: 0.2,
+      responseSchema: RECOMMENDATIONS_SCHEMA,
+      temperature: 0.35,
     },
   });
 
   const text = res?.candidates?.[0]?.content?.parts?.find((p) => p.text && !p.thought)?.text;
-  if (!text) throw new Error('Gemini no pudo identificar los alimentos del plato.');
-  const parsed = JSON.parse(text);
-  return Array.isArray(parsed.items) ? parsed.items : [];
+  if (!text) throw new Error('No se pudieron generar recomendaciones.');
+  return JSON.parse(text);
 }
 
 // =========================================================================
-// 2) Coach IA with function calling
+// 3) Conversational & Multimodal Inventory Coach IA
 // =========================================================================
 const COACH_TOOLS = [
   {
     functionDeclarations: [
       {
         name: 'get_inventory',
-        description: 'Obtiene todos los artículos actuales de la despensa con cantidad, mínimo, unidad, estado y macros por porción.',
+        description: 'Obtiene todos los productos actuales de la despensa con cantidad, mínimo, unidad, estado y macros detallados.',
       },
       {
         name: 'get_shopping_list',
-        description: 'Obtiene los artículos agotados, por acabarse o marcados para comprar, con cantidad sugerida.',
+        description: 'Obtiene la lista de compras actual (productos agotados, por acabarse o marcados para comprar).',
       },
       {
-        name: 'get_profile_and_today',
-        description: 'Obtiene el perfil fitness del usuario, sus metas diarias de macros, días de cobertura de proteína en despensa y lo que ha comido hoy.',
-      },
-      {
-        name: 'get_recipes',
-        description: 'Obtiene todas las recetas y comidas guardadas del usuario con sus macros e ingredientes.',
-      },
-      {
-        name: 'save_recipe',
-        description: 'Guarda una comida ya hecha o una receta recomendada en "Mis Recetas" para poder registrarla después con 1 toque.',
-        parameters: {
-          type: 'OBJECT',
-          properties: {
-            name: { type: 'STRING', description: 'Nombre atractivo y claro de la receta' },
-            meal: { type: 'STRING', enum: MEAL_IDS, description: 'Momento ideal del día' },
-            kcal: { type: 'NUMBER', description: 'Calorías totales por porción' },
-            protein: { type: 'NUMBER', description: 'Gramos de proteína por porción' },
-            carbs: { type: 'NUMBER', description: 'Gramos de carbohidratos por porción' },
-            fat: { type: 'NUMBER', description: 'Gramos de grasa por porción' },
-            ingredients: {
-              type: 'ARRAY',
-              items: { type: 'STRING' },
-              description: 'Lista corta de ingredientes con cantidades (ej. "150 g pechuga de pollo", "1 taza arroz")',
-            },
-            steps: { type: 'STRING', description: 'Preparación breve en 2-4 líneas' },
-            attachChatPhoto: { type: 'BOOLEAN', description: 'True si el usuario adjuntó una foto de este platillo en este mensaje' },
-          },
-          required: ['name', 'kcal', 'protein'],
-        },
-      },
-      {
-        name: 'log_recipe',
-        description: 'Registra en el diario de hoy una receta ya guardada en "Mis Recetas".',
-        parameters: {
-          type: 'OBJECT',
-          properties: {
-            recipeName: { type: 'STRING', description: 'Nombre de la receta guardada' },
-            servings: { type: 'NUMBER', description: 'Número de porciones (default 1)' },
-            meal: { type: 'STRING', enum: MEAL_IDS },
-          },
-          required: ['recipeName'],
-        },
+        name: 'get_pantry_analytics',
+        description: 'Obtiene el perfil fitness del usuario, metas diarias, días de cobertura de proteína en casa y desglose de tipos de proteína/carbos/grasas en despensa.',
       },
       {
         name: 'add_item',
-        description: 'Agrega un nuevo producto al inventario de la despensa.',
+        description: 'Agrega un nuevo producto al inventario de la despensa (con su tabla nutrimental estimada o leída).',
         parameters: {
           type: 'OBJECT',
           properties: {
@@ -277,6 +231,7 @@ const COACH_TOOLS = [
             unit: { type: 'STRING', enum: UNITS },
             qty: { type: 'NUMBER' },
             min: { type: 'NUMBER' },
+            needBuy: { type: 'BOOLEAN', description: 'True si se agrega con qty 0 directo para comprar' },
             serving: { type: 'STRING' },
             servingsPerUnit: { type: 'NUMBER' },
             kcal: { type: 'NUMBER' },
@@ -290,20 +245,20 @@ const COACH_TOOLS = [
             satFat: { type: 'NUMBER' },
             unsatFat: { type: 'NUMBER' },
             sodium: { type: 'NUMBER' },
-            attachChatPhoto: { type: 'BOOLEAN', description: 'True si el usuario envió foto de este producto' },
+            attachChatPhoto: { type: 'BOOLEAN', description: 'True si el usuario adjuntó foto del producto' },
           },
           required: ['name', 'qty'],
         },
       },
       {
         name: 'update_quantity',
-        description: 'Actualiza la cantidad de un artículo existente en la despensa (sumando/restando delta o fijando nueva cantidad).',
+        description: 'Actualiza el stock de un artículo existente en la despensa (sumando compras o restando lo que se gastó).',
         parameters: {
           type: 'OBJECT',
           properties: {
-            itemName: { type: 'STRING', description: 'Nombre del artículo en la despensa' },
-            delta: { type: 'NUMBER', description: 'Cambio relativo en unidades del artículo (ej. -3 o +2)' },
-            setQty: { type: 'NUMBER', description: 'Cantidad exacta nueva (alternativa a delta)' },
+            itemName: { type: 'STRING' },
+            delta: { type: 'NUMBER', description: 'Cambio relativo (ej. -2 si se gastaron 2, +3 si compró 3)' },
+            setQty: { type: 'NUMBER', description: 'Cantidad exacta nueva' },
           },
           required: ['itemName'],
         },
@@ -321,28 +276,15 @@ const COACH_TOOLS = [
         },
       },
       {
-        name: 'log_food',
-        description: 'Registra una comida en el diario de hoy. Si el producto existe en la despensa, descuenta automáticamente las porciones del inventario.',
+        name: 'mark_for_shopping',
+        description: 'Marca o desmarca un artículo existente para incluirlo en la lista de compras.',
         parameters: {
           type: 'OBJECT',
           properties: {
-            itemName: { type: 'STRING', description: 'Nombre del alimento o producto de la despensa' },
-            servings: { type: 'NUMBER', description: 'Número de porciones consumidas (ej. 1, 2, 1.5)' },
-            meal: { type: 'STRING', enum: MEAL_IDS, description: 'Momento del día' },
-            deductInventory: { type: 'BOOLEAN', description: 'Si descontar de la despensa (default true)' },
-            kcal: { type: 'NUMBER', description: 'Solo si el alimento no está en despensa' },
-            protein: { type: 'NUMBER', description: 'Solo si el alimento no está en despensa' },
-            proteinType: { type: 'STRING', enum: ['animal', 'vegetal', 'suplemento'] },
-            carbs: { type: 'NUMBER', description: 'Solo si el alimento no está en despensa' },
-            carbType: { type: 'STRING', enum: ['complejo', 'simple', 'fibroso'] },
-            fiber: { type: 'NUMBER' },
-            sugar: { type: 'NUMBER' },
-            fat: { type: 'NUMBER', description: 'Solo si el alimento no está en despensa' },
-            satFat: { type: 'NUMBER' },
-            unsatFat: { type: 'NUMBER' },
-            sodium: { type: 'NUMBER' },
+            itemName: { type: 'STRING' },
+            needBuy: { type: 'BOOLEAN' },
           },
-          required: ['itemName', 'servings'],
+          required: ['itemName', 'needBuy'],
         },
       },
     ],
@@ -353,24 +295,19 @@ const SYSTEM_INSTRUCTION = {
   parts: [
     {
       text: [
-        'Eres el Coach IA de FitDespensa: un asistente conversacional súper fácil de usar para nutrición fitness, despensa y recetas en español.',
-        'Tu objetivo es que el usuario NO tenga que llenar formularios: tú haces el trabajo por él usando tus herramientas.',
-        'Reglas clave:',
-        '1. Si el usuario manda una FOTO de un platillo o comida preparada: identifica el platillo, estima sus macros realistas (kcal, proteína, carbs, grasas) y regístralo con log_food; si pide guardarlo como receta (o es un buen platillo casero), ofrécele guardarlo o usa save_recipe con attachChatPhoto=true.',
-        '2. Si el usuario manda una FOTO de un producto empaquetado o despensa: extrae nombre, categoría, unidad y macros, y agrégalo con add_item (attachChatPhoto=true).',
-        '3. Si el usuario dice qué comió (ej. "comí 3 huevos con avena", "me comí mi receta de pollo"): usa log_food (o log_recipe si coincide con una receta guardada). Si dice que compró algo, usa update_quantity o add_item.',
-        '4. Si el usuario pide ideas de comida, consulta primero get_inventory, get_profile_and_today y get_recipes. Nunca inventes productos que no tiene. Al final pregunta brevemente si quiere guardar la idea en "Mis Recetas" o registrarla.',
-        '5. Sé cercano, directo, claro y breve (usa negritas y viñetas cortas). No des diagnósticos médicos.',
+        'Eres el Asistente IA de Inventario y Nutrición de FitDespensa en español.',
+        'La app está enfocada 100% en gestionar el inventario de la despensa fitness, autocompletar tablas nutrimentales y dar recomendaciones inteligentes de compra y uso del stock.',
+        'Reglas:',
+        '1. Consulta siempre get_inventory, get_pantry_analytics y get_shopping_list antes de dar recomendaciones. Nunca inventes productos que no están en la despensa.',
+        '2. Si el usuario manda una FOTO de uno o varios productos o etiquetas: extrae su tabla nutrimental completa (incluyendo tipo de proteína animal/vegetal/suplemento, tipo de carbos complejo/simple/fibroso, fibra, azúcares, grasas saturadas/insaturadas y sodio) y agrégalos con add_item (attachChatPhoto=true).',
+        '3. Si el usuario dice qué compró o qué se acabó (ej. "se acabó el pollo", "quedan 2 huevos", "compré 1 kg de avena"), actualiza el inventario de inmediato con update_quantity o add_item.',
+        '4. Da recomendaciones proactivas sobre qué reponer, qué fuentes de proteína/carbos/grasas faltan para balancear su despensa según su objetivo, y cómo aprovechar lo que ya tiene en casa.',
+        '5. Sé directo, claro y conciso con viñetas cortas.',
       ].join('\n'),
     },
   ],
 };
 
-/**
- * Runs a conversational turn (text + optional compressed JPEG photo) with function-calling loop.
- * `history` is an array of Gemini content objects ({ role, parts }).
- * `executor(name, args)` returns { result, action? }.
- */
 export async function runCoachTurn(history, userText, executor, photoDataUrl = null) {
   const userParts = [];
   if (userText) userParts.push({ text: userText });
@@ -380,7 +317,7 @@ export async function runCoachTurn(history, userText, executor, photoDataUrl = n
       userParts.push({ inlineData: { mimeType: match[1], data: match[2] } });
       if (!userText) {
         userParts.unshift({
-          text: 'Analiza esta foto: si es un platillo/comida lista, estima sus macros y pregúntame o regístrala; si es un producto de despensa, agrégalo a mi inventario.',
+          text: 'Analiza esta foto de producto o despensa: extrae su tabla nutrimental completa y agrégalo o actualiza mi inventario.',
         });
       }
     }
@@ -394,13 +331,13 @@ export async function runCoachTurn(history, userText, executor, photoDataUrl = n
       systemInstruction: SYSTEM_INSTRUCTION,
       contents,
       tools: COACH_TOOLS,
-      generationConfig: { temperature: 0.4 },
+      generationConfig: { temperature: 0.35 },
     });
 
     const candidate = res?.candidates?.[0];
     const modelContent = candidate?.content;
     if (!modelContent?.parts?.length) {
-      throw new Error('El coach no pudo generar una respuesta.');
+      throw new Error('El asistente no pudo generar una respuesta.');
     }
 
     contents.push(modelContent);
@@ -437,7 +374,7 @@ export async function runCoachTurn(history, userText, executor, photoDataUrl = n
   }
 
   return {
-    text: 'Se realizaron varias acciones. ¿Necesitas algo más?',
+    text: 'Inventario actualizado. ¿Necesitas otra recomendación?',
     actions,
     history: contents,
   };
