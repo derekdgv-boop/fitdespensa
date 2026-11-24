@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#070a0f" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="FitDespensa" />
+  <link rel="manifest" href="manifest.json" />
+  <title>FitDespensa · Nutrición, Despensa & Coach IA</title>
+  <meta name="description" content="Controla tu despensa fitness con fotos, macros, registro diario de comidas y un Coach IA con Gemini." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23a3e635'/%3E%3Cpath d='M18 4 7 18h8l-1 10 11-14h-8l1-10z' fill='%230a1204'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="style.css?v=3" />
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Desktop Sidebar -->
+    <aside class="sidebar" aria-label="Navegación principal">
+      <div class="sidebar-brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        </div>
+        <div class="brand-copy">
+          <span class="brand-name">FitDespensa</span>
+          <span class="brand-status" id="syncBadge">Local · IndexedDB</span>
+        </div>
+      </div>
+
+      <button type="button" class="btn btn-primary sidebar-cta" id="sidebarAddBtn">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        <span>Nuevo producto</span>
+      </button>
+
+      <nav class="nav-list" role="tablist">
+        <button class="nav-item active" data-tab="panel" role="tab" aria-selected="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></svg>
+          <span>Panel</span>
+        </button>
+        <button class="nav-item" data-tab="catalog" role="tab" aria-selected="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></svg>
+          <span>Catálogo</span>
+        </button>
+        <button class="nav-item" data-tab="diary" role="tab" aria-selected="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>
+          <span>Diario</span>
+        </button>
+        <button class="nav-item" data-tab="shopping" role="tab" aria-selected="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></svg>
+          <span>Compras</span>
+          <span class="nav-badge hidden" id="shoppingBadge">0</span>
+        </button>
+        <button class="nav-item" data-tab="coach" role="tab" aria-selected="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/></svg>
+          <span>Coach IA</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="sidebar-mini-card" id="sidebarProteinWidget">
+          <span class="mini-label">Cobertura despensa</span>
+          <strong class="mini-metric" id="sidebarCoverageVal">—</strong>
+        </div>
+        <div class="sidebar-tools">
+          <button class="icon-btn" id="themeBtn" type="button" title="Cambiar tema" aria-label="Cambiar tema"></button>
+          <button class="btn btn-ghost btn-sm flex-1" id="settingsBtn" type="button">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+            <span>Perfil y Ajustes</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Workspace -->
+    <div class="workspace">
+      <!-- Mobile Header -->
+      <header class="mobile-header">
+        <div class="sidebar-brand">
+          <div class="brand-mark brand-mark-sm" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          </div>
+          <div class="brand-copy">
+            <span class="brand-name">FitDespensa</span>
+            <span class="brand-status" id="syncBadgeMobile">Local</span>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button class="btn btn-primary btn-xs" id="mobileAddBtn" type="button" aria-label="Nuevo producto">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            <span>Nuevo</span>
+          </button>
+          <button class="icon-btn" id="themeBtnMobile" type="button" aria-label="Cambiar tema"></button>
+          <button class="icon-btn" id="settingsBtnMobile" type="button" aria-label="Perfil y Ajustes">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <main class="main">
+        <!-- 1. PANEL (Dashboard) -->
+        <section class="view active" id="view-panel">
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">Panel general</h1>
+              <p class="page-sub" id="panelDateSub">Resumen de tu despensa y macros de hoy</p>
+            </div>
+            <div class="page-actions">
+              <button type="button" class="btn btn-ghost btn-sm" id="panelLogBtn">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                <span>Registrar comida</span>
+              </button>
+              <button type="button" class="btn btn-primary btn-sm" id="panelAddBtn">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                <span>Agregar con foto</span>
+              </button>
+            </div>
+          </div>
+          <div id="panelContent"></div>
+        </section>
+
+        <!-- 2. CATÁLOGO -->
+        <section class="view" id="view-catalog">
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">Catálogo de despensa</h1>
+              <p class="page-sub">Controla tus existencias, fotos y tabla nutrimental</p>
+            </div>
+            <div class="page-actions">
+              <button type="button" class="btn btn-primary btn-sm" id="catalogAddBtn">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                <span>Agregar producto</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="toolbar">
+            <div class="search-wrap">
+              <svg class="search-ico" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              <input type="search" id="searchInput" class="search-input" placeholder="Buscar pollo, proteína, avena..." autocomplete="off" />
+            </div>
+            <div class="segmented" role="group" aria-label="Filtro rápido">
+              <button type="button" class="seg-btn active" data-stock-filter="all">Todos</button>
+              <button type="button" class="seg-btn" data-stock-filter="low">Por comprar</button>
+            </div>
+            <div class="segmented" role="group" aria-label="Vista del catálogo">
+              <button type="button" class="seg-btn active" data-view-mode="grid" title="Cuadrícula" aria-label="Cuadrícula">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+              </button>
+              <button type="button" class="seg-btn" data-view-mode="list" title="Lista" aria-label="Lista">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="chips" id="categoryChips"></div>
+          <div id="catalogList" class="catalog-grid"></div>
+        </section>
+
+        <!-- 3. DIARIO DE COMIDAS -->
+        <section class="view" id="view-diary">
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">Diario de alimentación</h1>
+              <p class="page-sub">Registra lo que comes y descuenta porciones automáticamente</p>
+            </div>
+            <div class="page-actions">
+              <div class="date-stepper">
+                <button type="button" class="icon-btn icon-btn-sm" id="prevDayBtn" aria-label="Día anterior">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg>
+                </button>
+                <div class="date-pill">
+                  <strong id="diaryDateLabel">Hoy</strong>
+                  <span id="diaryDateSub" class="muted"></span>
+                </div>
+                <button type="button" class="icon-btn icon-btn-sm" id="nextDayBtn" aria-label="Día siguiente">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m9 18 6-6-6-6"/></svg>
+                </button>
+              </div>
+              <button type="button" class="btn btn-primary btn-sm" id="addLogBtn">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                <span>Registrar</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="diarySummary"></div>
+          <div id="diaryMeals"></div>
+        </section>
+
+        <!-- 4. LISTA DE COMPRAS -->
+        <section class="view" id="view-shopping">
+          <div class="page-head">
+            <div>
+              <h1 class="page-title">Lista de compras</h1>
+              <p class="page-sub" id="shoppingSubtitle">Generada automáticamente según tus mínimos de stock</p>
+            </div>
+            <div class="page-actions">
+              <button type="button" class="btn btn-ghost btn-sm" id="copyListBtn">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                <span>Copiar</span>
+              </button>
+              <button type="button" class="btn btn-accent btn-sm" id="whatsappBtn">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                <span>WhatsApp</span>
+              </button>
+            </div>
+          </div>
+          <div id="shoppingList"></div>
+        </section>
+
+        <!-- 5. COACH IA -->
+        <section class="view" id="view-coach">
+          <div class="page-head">
+            <div class="coach-title-row">
+              <div class="ai-avatar">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/></svg>
+              </div>
+              <div>
+                <h1 class="page-title">Coach IA</h1>
+                <p class="page-sub" id="coachStatusSub">Conectado a tu inventario, metas y diario de hoy</p>
+              </div>
+            </div>
+            <div class="page-actions">
+              <button type="button" class="btn btn-ghost btn-sm" id="clearChatBtn">Nueva conversación</button>
+            </div>
+          </div>
+
+          <div id="coachKeyBanner" class="banner banner-warn hidden">
+            <div>
+              <strong>Configura tu API Key de Gemini</strong>
+              <p class="muted small-note">Agrega tu clave personal en Ajustes para chatear con el Coach IA y escanear productos con foto.</p>
+            </div>
+            <button type="button" class="btn btn-primary btn-sm" id="openSettingsFromCoach">Configurar clave</button>
+          </div>
+
+          <div class="coach-shell">
+            <div class="chat-messages" id="chatMessages" aria-live="polite"></div>
+
+            <div class="coach-prompts" id="coachSuggestions">
+              <button type="button" class="prompt-pill" data-prompt="¿Qué puedo cenar alto en proteína con lo que tengo en mi despensa?">Cena alta en proteína</button>
+              <button type="button" class="prompt-pill" data-prompt="Me comí 3 huevos en el desayuno">Me comí 3 huevos</button>
+              <button type="button" class="prompt-pill" data-prompt="¿Para cuántos días me alcanza la proteína y qué debería comprar?">Cobertura y compras</button>
+              <button type="button" class="prompt-pill" data-prompt="Arma una lista fitness inteligente según mi objetivo y lo que falta">Lista para mi meta</button>
+            </div>
+
+            <form class="chat-form" id="chatForm">
+              <input type="text" id="chatInput" class="chat-input" placeholder="Escribe al Coach… ej. «Me tomé 1 scoop de whey» o «¿Qué desayuno?»" autocomplete="off" />
+              <button type="submit" class="btn btn-primary" id="chatSendBtn">
+                <span>Enviar</span>
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+              </button>
+            </form>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- Mobile Bottom Tab Bar -->
+    <nav class="mobile-nav" role="tablist" aria-label="Navegación móvil">
+      <button class="mnav-item active" data-tab="panel" role="tab" aria-selected="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></svg>
+        <span>Panel</span>
+      </button>
+      <button class="mnav-item" data-tab="catalog" role="tab" aria-selected="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></svg>
+        <span>Catálogo</span>
+      </button>
+      <button class="mnav-item" data-tab="diary" role="tab" aria-selected="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2M7 2v20M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>
+        <span>Diario</span>
+      </button>
+      <button class="mnav-item" data-tab="shopping" role="tab" aria-selected="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></svg>
+        <span>Compras</span>
+        <span class="mnav-dot hidden" id="shoppingBadgeMobile">0</span>
+      </button>
+      <button class="mnav-item" data-tab="coach" role="tab" aria-selected="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/></svg>
+        <span>Coach</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- MODAL: Agregar / Editar Producto -->
+  <div class="modal-backdrop hidden" id="itemModal" role="dialog" aria-modal="true" aria-labelledby="itemModalTitle">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="itemModalTitle">Nuevo producto</h2>
+        <button type="button" class="icon-btn icon-btn-sm" data-close-modal="itemModal" aria-label="Cerrar">✕</button>
+      </div>
+      <form id="itemForm" class="modal-body">
+        <input type="hidden" id="itemId" />
+
+        <div class="photo-field">
+          <div class="photo-preview" id="itemPhotoPreview">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6" class="muted"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          </div>
+          <div class="photo-controls">
+            <div class="photo-btn-row">
+              <button type="button" class="btn btn-ghost btn-sm" id="takePhotoBtn">Cámara</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="galleryPhotoBtn">Galería</button>
+              <button type="button" class="btn btn-ghost btn-sm hidden" id="removePhotoBtn">Quitar</button>
+            </div>
+            <button type="button" class="btn btn-accent btn-sm hidden" id="scanPhotoBtn">✨ Autocompletar con Gemini</button>
+            <span class="muted small-note" id="photoMeta">Se comprime automáticamente (~30 KB) junto al producto</span>
+          </div>
+          <input type="file" id="cameraFileInput" accept="image/*" capture="environment" class="hidden" />
+          <input type="file" id="galleryFileInput" accept="image/*" class="hidden" />
+        </div>
+
+        <div class="form-grid">
+          <label class="field span-2">
+            <span>Nombre del producto *</span>
+            <input type="text" id="itemName" required maxlength="60" placeholder="Ej. Pechuga de pollo, Proteína whey" />
+          </label>
+          <label class="field">
+            <span>Categoría</span>
+            <select id="itemCategory"></select>
+          </label>
+          <label class="field">
+            <span>Unidad</span>
+            <select id="itemUnit"></select>
+          </label>
+          <label class="field">
+            <span>Cantidad actual *</span>
+            <input type="number" id="itemQty" step="any" min="0" required value="1" />
+          </label>
+          <label class="field">
+            <span>Mínimo de alerta *</span>
+            <input type="number" id="itemMin" step="any" min="0" required value="1" />
+          </label>
+        </div>
+
+        <label class="checkbox-row">
+          <input type="checkbox" id="itemNeedBuy" />
+          <span>Añadir directamente a la lista de compras</span>
+        </label>
+
+        <details class="nutrition-details" id="nutritionDetails" open>
+          <summary>Información nutrimental (por porción)</summary>
+          <div class="form-grid nutrition-grid">
+            <label class="field">
+              <span>Porción</span>
+              <input type="text" id="itemServing" maxlength="40" placeholder="Ej. 1 scoop (30 g)" />
+            </label>
+            <label class="field">
+              <span>Porciones por unidad</span>
+              <input type="number" id="itemServingsPerUnit" step="any" min="0" placeholder="Ej. 33" />
+            </label>
+            <label class="field">
+              <span>Calorías (kcal)</span>
+              <input type="number" id="itemKcal" step="any" min="0" placeholder="0" />
+            </label>
+            <label class="field">
+              <span>Proteína (g)</span>
+              <input type="number" id="itemProtein" step="any" min="0" placeholder="0" />
+            </label>
+            <label class="field">
+              <span>Carbohidratos (g)</span>
+              <input type="number" id="itemCarbs" step="any" min="0" placeholder="0" />
+            </label>
+            <label class="field">
+              <span>Grasas (g)</span>
+              <input type="number" id="itemFat" step="any" min="0" placeholder="0" />
+            </label>
+          </div>
+        </details>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-danger hidden" id="deleteItemBtn">Eliminar</button>
+          <div class="spacer"></div>
+          <button type="button" class="btn btn-ghost" data-close-modal="itemModal">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar producto</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Cámara Web -->
+  <div class="modal-backdrop hidden" id="cameraModal" role="dialog" aria-modal="true" aria-labelledby="cameraModalTitle">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <h2 id="cameraModalTitle">Capturar producto</h2>
+        <button type="button" class="icon-btn icon-btn-sm" id="closeCameraBtn" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="viewfinder">
+          <video id="cameraVideo" autoplay playsinline muted></video>
+          <div class="viewfinder-guide" aria-hidden="true"></div>
+        </div>
+        <p class="muted small-note center">Encuadra el producto o su tabla nutrimental dentro del marco.</p>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" id="cancelCameraBtn">Cancelar</button>
+          <button type="button" class="btn btn-primary" id="capturePhotoBtn">Capturar foto</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Registrar Comida -->
+  <div class="modal-backdrop hidden" id="logModal" role="dialog" aria-modal="true" aria-labelledby="logModalTitle">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="logModalTitle">Registrar comida</h2>
+        <button type="button" class="icon-btn icon-btn-sm" data-close-modal="logModal" aria-label="Cerrar">✕</button>
+      </div>
+      <form id="logForm" class="modal-body">
+        <div class="form-grid">
+          <label class="field span-2">
+            <span>Momento del día</span>
+            <select id="logMeal"></select>
+          </label>
+          <label class="field span-2">
+            <span>Elegir de tu despensa</span>
+            <select id="logItemSelect"></select>
+          </label>
+          <label class="field span-2">
+            <span>Nombre del alimento *</span>
+            <input type="text" id="logName" maxlength="60" placeholder="Ej. Tacos de pollo, licuado..." />
+          </label>
+          <label class="field">
+            <span>Porciones *</span>
+            <input type="number" id="logServings" step="any" min="0.1" value="1" required />
+          </label>
+          <label class="field">
+            <span>Calorías (kcal)</span>
+            <input type="number" id="logKcal" step="any" min="0" value="0" />
+          </label>
+          <label class="field">
+            <span>Proteína (g)</span>
+            <input type="number" id="logProtein" step="any" min="0" value="0" />
+          </label>
+          <label class="field">
+            <span>Carbohidratos (g)</span>
+            <input type="number" id="logCarbs" step="any" min="0" value="0" />
+          </label>
+          <label class="field">
+            <span>Grasas (g)</span>
+            <input type="number" id="logFat" step="any" min="0" value="0" />
+          </label>
+        </div>
+
+        <label class="checkbox-row hidden" id="logDeductRow">
+          <input type="checkbox" id="logDeduct" checked />
+          <span id="logDeductLabel">Descontar automáticamente de la despensa</span>
+        </label>
+
+        <div class="modal-footer">
+          <div class="spacer"></div>
+          <button type="button" class="btn btn-ghost" data-close-modal="logModal">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar registro</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Perfil y Ajustes (con pestañas internas) -->
+  <div class="modal-backdrop hidden" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h2 id="settingsModalTitle">Perfil y ajustes</h2>
+        <button type="button" class="icon-btn icon-btn-sm" data-close-modal="settingsModal" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="settings-tabs" role="tablist">
+        <button type="button" class="stab active" data-stab="profile">Perfil fitness</button>
+        <button type="button" class="stab" data-stab="ai">Coach IA (Gemini)</button>
+        <button type="button" class="stab" data-stab="sync">Datos y nube</button>
+      </div>
+      <div class="modal-body">
+        <!-- Tab 1: Perfil Fitness -->
+        <form id="profileForm" class="stab-panel active" data-stab-panel="profile">
+          <div class="form-grid">
+            <label class="field">
+              <span>Sexo</span>
+              <select id="profSex">
+                <option value="h">Hombre</option>
+                <option value="m">Mujer</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Edad (años)</span>
+              <input type="number" id="profAge" min="14" max="100" placeholder="28" />
+            </label>
+            <label class="field">
+              <span>Estatura (cm)</span>
+              <input type="number" id="profHeight" min="120" max="230" placeholder="175" />
+            </label>
+            <label class="field">
+              <span>Peso (kg)</span>
+              <input type="number" id="profWeight" step="0.1" min="35" max="250" placeholder="75" />
+            </label>
+            <label class="field span-2">
+              <span>Nivel de actividad</span>
+              <select id="profActivity"></select>
+            </label>
+            <label class="field span-2">
+              <span>Objetivo</span>
+              <select id="profGoal"></select>
+            </label>
+          </div>
+          <div class="targets-preview" id="profileTargetsPreview">
+            Completa tus datos para calcular calorías y proteína diarias (Mifflin-St Jeor).
+          </div>
+          <details class="nutrition-details">
+            <summary>Personalizar metas manualmente (opcional)</summary>
+            <div class="form-grid nutrition-grid">
+              <label class="field">
+                <span>Kcal/día</span>
+                <input type="number" id="customKcal" min="0" placeholder="Automático" />
+              </label>
+              <label class="field">
+                <span>Proteína (g/día)</span>
+                <input type="number" id="customProtein" min="0" placeholder="Automático" />
+              </label>
+              <label class="field">
+                <span>Carbs (g/día)</span>
+                <input type="number" id="customCarbs" min="0" placeholder="Automático" />
+              </label>
+              <label class="field">
+                <span>Grasas (g/día)</span>
+                <input type="number" id="customFat" min="0" placeholder="Automático" />
+              </label>
+            </div>
+          </details>
+          <div class="modal-footer">
+            <div class="spacer"></div>
+            <button type="submit" class="btn btn-primary">Guardar perfil</button>
+          </div>
+        </form>
+
+        <!-- Tab 2: Gemini AI -->
+        <form id="geminiForm" class="stab-panel" data-stab-panel="ai">
+          <p class="muted small-note">
+            Tu clave se guarda únicamente en este navegador y se envía directo a la API de Google. Obtén una gratis en
+            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>.
+          </p>
+          <div class="form-grid">
+            <label class="field span-2">
+              <span>Gemini API Key</span>
+              <input type="password" id="geminiKeyInput" placeholder="AIza..." autocomplete="off" />
+            </label>
+            <label class="field span-2">
+              <span>Modelo</span>
+              <div class="inline-row">
+                <input type="text" id="geminiModelInput" list="geminiModelSuggestions" placeholder="gemini-3.8-flash" />
+                <button type="button" class="btn btn-ghost btn-sm" id="detectModelsBtn">Detectar</button>
+              </div>
+              <datalist id="geminiModelSuggestions">
+                <option value="gemini-3.8-flash"></option>
+                <option value="gemini-2.5-flash-lite"></option>
+              </datalist>
+            </label>
+          </div>
+          <div class="targets-preview hidden" id="geminiTestResult"></div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-ghost btn-sm" id="testGeminiBtn">Probar conexión</button>
+            <div class="spacer"></div>
+            <button type="submit" class="btn btn-primary">Guardar configuración IA</button>
+          </div>
+        </form>
+
+        <!-- Tab 3: Datos y Nube -->
+        <div class="stab-panel" data-stab-panel="sync">
+          <div class="targets-preview" id="storageStatusText"></div>
+          <div class="form-grid">
+            <label class="field span-2">
+              <span>Código de hogar (Firebase Firestore)</span>
+              <div class="inline-row">
+                <input type="text" id="householdCodeInput" maxlength="40" />
+                <button type="button" class="btn btn-ghost btn-sm" id="saveHouseholdBtn">Aplicar</button>
+              </div>
+            </label>
+          </div>
+          <div class="divider"></div>
+          <div class="inline-row" style="justify-content:space-between; align-items:center;">
+            <div>
+              <strong>Catálogo fitness de ejemplo</strong>
+              <p class="muted small-note">Agrega 13 productos comunes con macros reales para explorar la app.</p>
+            </div>
+            <button type="button" class="btn btn-ghost btn-sm" id="seedDataBtn">Cargar ejemplo</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toastContainer" aria-live="polite"></div>
+
+  <script type="module" src="app.js?v=7"></script>
+</body>
+</html>
