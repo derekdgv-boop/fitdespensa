@@ -1,5 +1,5 @@
 // ui.js — Pure inventory & AI recommendations rendering templates for FitDespensa.
-import { CATEGORIES } from './constants.js?v=13';
+import { CATEGORIES } from './constants.js?v=21';
 import {
   STATUS_LABEL,
   catIcon,
@@ -205,8 +205,14 @@ export function renderAiRecommendations(data, addedNames = new Set()) {
 
   return `
     <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
-      <div class="recs-headline">✨ ${esc(data.headline || '')}</div>
-      <button type="button" class="icon-btn icon-btn-sm" data-action="close-recs" title="Ocultar recomendaciones" aria-label="Ocultar">✕</button>
+      <div>
+        <div class="recs-headline">✨ ${esc(data.headline || '')}</div>
+        ${data.speedBadge ? `<span class="macro-tag" style="margin-top:4px; display:inline-block;">⚡ ${esc(data.speedBadge)}</span>` : ''}
+      </div>
+      <div style="display:flex; gap:5px;">
+        <button type="button" class="icon-btn icon-btn-sm" data-action="refresh-recs" title="Recalcular recomendaciones" aria-label="Actualizar">↻</button>
+        <button type="button" class="icon-btn icon-btn-sm" data-action="close-recs" title="Ocultar recomendaciones" aria-label="Ocultar">✕</button>
+      </div>
     </div>
     <div class="recs-insights-grid">${insightsHtml}</div>
     ${

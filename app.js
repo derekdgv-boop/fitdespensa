@@ -1,5 +1,5 @@
 // app.js — FitDespensa orchestrator (100% Inventory + AI Recommendations)
-import { CATEGORIES, UNITS } from './constants.js?v=13';
+import { CATEGORIES, QUICK_FOOD_DB, UNITS } from './constants.js?v=21';
 import {
   STATUS_LABEL,
   inShoppingList,
@@ -22,15 +22,16 @@ import {
 import { getHouseholdCode, initStorage, setHouseholdCode } from './storage.js?v=13';
 import { canUseWebcam, compressFile, dataUrlByteSize, isMobileDevice, startBarcodeScanner, startWebcam } from './camera.js?v=13';
 import {
-  connectAndVerifyGemini,
+  connectAndVerifyAi,
+  detectProviderFromKey,
   generatePantryRecommendations,
-  getGeminiConfig,
+  getAiConfig,
   hasGeminiKey,
   listGeminiModels,
   recognizeProduct,
   runCoachTurn,
-  setGeminiConfig,
-} from './ai.js?v=20';
+  setAiConfig,
+} from './ai.js?v=21';
 import {
   esc,
   formatCoachText,
@@ -41,7 +42,7 @@ import {
   renderPantryOverview,
   renderPantryQuality,
   renderShoppingList,
-} from './ui.js?v=14';
+} from './ui.js?v=21';
 
 const SVG_SUN = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>`;
 const SVG_MOON = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>`;
@@ -68,6 +69,8 @@ const state = {
   aiRecsError: null,
   aiRecsAdded: new Set(),
   aiRecsBusy: false,
+  lastRecFocus: 'general',
+  selectedAiProv: 'groq',
   barcodeScanner: null,
   currentPhoto: null,
   pendingChatPhoto: null,
@@ -157,10 +160,11 @@ function renderAll() {
   });
 
   const keyReady = hasGeminiKey();
+  const cfg = getAiConfig();
   $('coachKeyBanner').classList.toggle('hidden', keyReady);
   $('coachStatusSub').textContent = keyReady
-    ? `${getGeminiConfig().model} · Sube foto, dicta por voz o pide recomendaciones`
-    : 'Configura tu clave de Gemini en Ajustes';
+    ? `${cfg.provider === 'groq' ? '⚡ Groq' : '✨ Gemini'} (${cfg.model}) · Sube foto, dicta por voz o pide recomendaciones`
+    : 'Configura tu clave de Groq (0.4s) o Gemini en Ajustes';
 
   renderChat();
 }
@@ -336,14 +340,15 @@ function buildInventorySummaryPayload() {
   };
 }
 
-async function requestAiRecommendations(focus = 'general') {
+async function requestAiRecommendations(focus = 'general', forceRefresh = false) {
   if (!hasGeminiKey()) {
-    toast('Pega tu API key de Gemini en Ajustes → IA para usar las recomendaciones.');
+    toast('Configura tu clave de Groq (0.4s) o Gemini en Ajustes.');
     openSettingsModal('ai');
     return;
   }
   if (state.aiRecsBusy) return;
 
+  state.lastRecFocus = focus;
   state.aiRecsBusy = true;
   state.aiRecsError = null;
   renderRecsPanels();
@@ -351,6 +356,7 @@ async function requestAiRecommendations(focus = 'general') {
     state.aiRecs = await generatePantryRecommendations({
       inventorySummary: buildInventorySummaryPayload(),
       focus,
+      forceRefresh,
     });
   } catch (err) {
     state.aiRecsError = err.message || String(err);
@@ -484,8 +490,54 @@ function openItemModal(item = null) {
   $('itemSatFat').value = item?.satFat ?? '';
   $('itemUnsatFat').value = item?.unsatFat ?? '';
   $('deleteItemBtn').classList.toggle('hidden', !item);
+  $('quickFoodMatches').classList.add('hidden');
   setModalPhoto(item?.photo || null);
   $('itemModal').classList.remove('hidden');
+}
+
+function renderQuickFoodSuggestions() {
+  const q = normText($('itemName').value);
+  const box = $('quickFoodMatches');
+  if (q.length < 2) {
+    box.classList.add('hidden');
+    return;
+  }
+  const matches = QUICK_FOOD_DB.filter((f) => normText(f.name).includes(q)).slice(0, 6);
+  if (!matches.length) {
+    box.classList.add('hidden');
+    return;
+  }
+  box.classList.remove('hidden');
+  box.innerHTML = matches
+    .map(
+      (f, idx) =>
+        `<button type="button" class="picker-chip" data-quick-food="${esc(f.name)}">⚡ ${esc(f.name)} · ${f.protein}g P · ${f.kcal} kcal</button>`
+    )
+    .join('');
+}
+
+function applyQuickFood(foodName) {
+  const f = QUICK_FOOD_DB.find((x) => x.name === foodName);
+  if (!f) return;
+  $('itemName').value = f.name;
+  $('itemCategory').value = f.category;
+  $('itemUnit').value = f.unit;
+  $('itemServing').value = f.serving || '';
+  $('itemServingsPerUnit').value = f.servingsPerUnit ?? '';
+  $('itemKcal').value = f.kcal ?? '';
+  $('itemProtein').value = f.protein ?? '';
+  $('itemProteinType').value = f.proteinType || 'animal';
+  $('itemCarbs').value = f.carbs ?? '';
+  $('itemCarbType').value = f.carbType || 'complejo';
+  $('itemFiber').value = f.fiber ?? '';
+  $('itemSugar').value = f.sugar ?? '';
+  $('itemFat').value = f.fat ?? '';
+  $('itemSatFat').value = f.satFat ?? '';
+  $('itemUnsatFat').value = f.unsatFat ?? '';
+  $('itemSodium').value = f.sodium ?? '';
+  $('nutritionDetails').open = true;
+  $('quickFoodMatches').classList.add('hidden');
+  toast(`⚡ Tabla nutrimental cargada en 0ms: ${f.name}`);
 }
 
 async function handlePhotoFile(file, target = 'item') {
@@ -611,6 +663,29 @@ function updateProfilePreview() {
   `;
 }
 
+function renderAiProviderUI(prov) {
+  state.selectedAiProv = prov;
+  document.querySelectorAll('[data-ai-prov]').forEach((b) =>
+    b.classList.toggle('active', b.dataset.aiProv === prov)
+  );
+  const cfg = getAiConfig();
+  if (prov === 'groq') {
+    $('aiProviderHelp').innerHTML =
+      '<strong>⚡ Groq es gratis y ~10× más rápido (0.3–0.5s)</strong> e incluye lectura de etiquetas con Llama 4. Saca tu clave gratis en <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer">console.groq.com/keys</a>.';
+    $('aiKeyLabel').textContent = 'Groq API Key (empieza con gsk_...)';
+    $('geminiKeyInput').placeholder = 'Pega aquí tu clave gsk_...';
+    $('geminiKeyInput').value = cfg.groqKey || '';
+    $('geminiModelInput').value = cfg.groqModel || 'llama-3.3-70b-versatile';
+  } else {
+    $('aiProviderHelp').innerHTML =
+      'Usa Google Gemini con modo rápido activado (<code>thinkingBudget: 0</code>). Consigue tu clave en <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>.';
+    $('aiKeyLabel').textContent = 'Gemini API Key (empieza con AIza...)';
+    $('geminiKeyInput').placeholder = 'Pega aquí tu clave AIza...';
+    $('geminiKeyInput').value = cfg.geminiKey || '';
+    $('geminiModelInput').value = cfg.geminiModel || 'gemini-3.8-flash';
+  }
+}
+
 function openSettingsModal(initialTab = 'ai') {
   const p = state.profile || {};
   $('profSex').value = p.sex || 'h';
@@ -625,9 +700,8 @@ function openSettingsModal(initialTab = 'ai') {
   $('customFat').value = p.custom?.fat || '';
   updateProfilePreview();
 
-  const gem = getGeminiConfig();
-  $('geminiKeyInput').value = gem.apiKey;
-  $('geminiModelInput').value = gem.model;
+  const cfg = getAiConfig();
+  renderAiProviderUI(cfg.provider || 'groq');
 
   $('householdCodeInput').value = getHouseholdCode();
   $('storageStatusText').textContent =
@@ -917,6 +991,7 @@ function bindEvents() {
 
     if (action === 'open-settings') openSettingsModal('profile');
     else if (action === 'open-ai-settings') openSettingsModal('ai');
+    else if (action === 'refresh-recs') requestAiRecommendations(state.lastRecFocus || 'general', true);
     else if (action === 'close-recs') {
       state.aiRecs = null;
       state.aiRecsError = null;
@@ -1123,6 +1198,32 @@ function bindEvents() {
     toast('Meta fitness guardada');
   });
 
+  // 0ms Instant Food Database Autocomplete on Item Name
+  $('itemName').addEventListener('input', renderQuickFoodSuggestions);
+  $('quickFoodMatches').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-quick-food]');
+    if (btn) applyQuickFood(btn.dataset.quickFood);
+  });
+
+  // Multi-provider AI switcher (Groq / Gemini)
+  document.querySelectorAll('[data-ai-prov]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      setAiConfig({ provider: btn.dataset.aiProv });
+      renderAiProviderUI(btn.dataset.aiProv);
+      renderAll();
+    });
+  });
+
+  $('geminiKeyInput').addEventListener('input', () => {
+    const inferred = detectProviderFromKey($('geminiKeyInput').value);
+    if (inferred && inferred !== state.selectedAiProv) {
+      state.selectedAiProv = inferred;
+      document.querySelectorAll('[data-ai-prov]').forEach((b) =>
+        b.classList.toggle('active', b.dataset.aiProv === inferred)
+      );
+    }
+  });
+
   $('toggleKeyVisBtn').addEventListener('click', () => {
     const inp = $('geminiKeyInput');
     const isHidden = inp.type === 'password';
@@ -1135,37 +1236,35 @@ function bindEvents() {
     const saveBtn = $('saveGeminiBtn');
     const testBtn = $('testGeminiBtn');
     out.classList.remove('hidden');
-    out.innerHTML = '⏳ Validando tu API Key y detectando el modelo compatible en Google...';
+    out.innerHTML = '⏳ Validando tu API Key y conectando al motor más rápido...';
     saveBtn.disabled = true;
     testBtn.disabled = true;
 
     try {
-      const info = await connectAndVerifyGemini($('geminiKeyInput').value, $('geminiModelInput').value);
+      const info = await connectAndVerifyAi(
+        $('geminiKeyInput').value,
+        $('geminiModelInput').value,
+        state.selectedAiProv
+      );
+      renderAiProviderUI(info.provider);
       $('geminiKeyInput').value = info.apiKey;
       $('geminiModelInput').value = info.model;
       state.aiRecsError = null;
       renderAll();
-      out.innerHTML = `<strong style="color:var(--ok)">✅ ¡Conectado con éxito!</strong> Modelo activo: <code>${esc(info.model)}</code>.`;
-      toast('¡IA de Gemini conectada y lista!');
+      out.innerHTML = `<strong style="color:var(--ok)">✅ ¡Conectado (${info.provider === 'groq' ? '⚡ Groq Ultra Rápido' : '✨ Gemini Rápido'})!</strong> Modelo: <code>${esc(info.model)}</code>.`;
+      toast('¡Motor IA conectado y listo!');
       if (closeOnSuccess) {
         setTimeout(() => {
           $('settingsModal').classList.add('hidden');
-          requestAiRecommendations('general');
-        }, 800);
+          requestAiRecommendations('general', true);
+        }, 650);
       }
     } catch (err) {
       renderAll();
       const msg = String(err.message || err);
-      if (msg.includes('Tu API Key ya quedó guardada')) {
-        out.innerHTML = `<strong style="color:var(--warn)">⚠️ Clave guardada correctamente:</strong> ${esc(msg)}`;
-        toast('Clave guardada (Google con alta demanda temporal)');
-        return;
-      }
-      let hint = 'Verifica que copiaste la clave completa (empieza con <code>AIza...</code>) desde Google AI Studio.';
+      let hint = 'Copia una clave <code>gsk_...</code> en console.groq.com/keys (ultra rápido) o <code>AIza...</code> en Google AI Studio.';
       if (msg.toLowerCase().includes('referer') || msg.toLowerCase().includes('blocked')) {
-        hint = 'Tu clave tiene restricciones de sitio web en Google Cloud/AI Studio. Quita las restricciones de HTTP Referrer o agrega <code>https://derekdgv-boop.github.io/*</code>.';
-      } else if (msg.toLowerCase().includes('failed to fetch') || msg.toLowerCase().includes('network')) {
-        hint = 'El navegador o red bloqueó la conexión a <code>generativelanguage.googleapis.com</code>. Pruébalo directo en Chrome o Safari.';
+        hint = 'Tu clave tiene restricciones de sitio web. Quita las restricciones o usa una clave gratuita de Groq.';
       }
       out.innerHTML = `<strong style="color:var(--danger)">❌ No se pudo conectar:</strong> ${esc(msg)}<div class="muted small-note" style="margin-top:6px;">💡 ${hint}</div>`;
     } finally {
@@ -1184,29 +1283,25 @@ function bindEvents() {
   });
 
   $('detectModelsBtn').addEventListener('click', async () => {
-    setGeminiConfig({ apiKey: $('geminiKeyInput').value });
+    setAiConfig({ provider: state.selectedAiProv, apiKey: $('geminiKeyInput').value });
     const btn = $('detectModelsBtn');
     const out = $('geminiTestResult');
     out.classList.remove('hidden');
-    out.textContent = 'Consultando modelos disponibles para tu clave...';
+    out.textContent = 'Consultando modelos disponibles...';
     btn.disabled = true;
     try {
       const models = await listGeminiModels();
       if (!models.length) {
-        out.innerHTML = `<strong style="color:var(--danger)">Sin modelos disponibles</strong> para esta API key.`;
+        out.innerHTML = `<strong style="color:var(--danger)">Sin modelos disponibles</strong> para esta clave.`;
         return;
       }
       const listEl = $('geminiModelSuggestions');
       listEl.innerHTML = models.map((m) => `<option value="${esc(m)}"></option>`).join('');
-      const preferred =
-        models.find((m) => m === 'gemini-3.8-flash') ||
-        models.find((m) => m.includes('3.') && m.includes('flash')) ||
-        models.find((m) => m.includes('flash') && !m.includes('2.5-flash') && !m.includes('2.0-flash')) ||
-        models[0];
+      const preferred = models[0];
       $('geminiModelInput').value = preferred;
-      setGeminiConfig({ model: preferred });
+      setAiConfig({ provider: state.selectedAiProv, model: preferred });
       renderAll();
-      out.innerHTML = `<strong style="color:var(--ok)">${models.length} modelos detectados.</strong> Seleccionado: <code>${esc(preferred)}</code>. Pulsa <strong>Probar conexión</strong>.`;
+      out.innerHTML = `<strong style="color:var(--ok)">${models.length} modelos detectados.</strong> Seleccionado: <code>${esc(preferred)}</code>.`;
     } catch (err) {
       out.innerHTML = `<strong style="color:var(--danger)">Error al detectar modelos:</strong> ${esc(err.message)}`;
     } finally {

@@ -295,7 +295,8 @@
         <div class="form-grid">
           <label class="field span-2">
             <span>Nombre del producto *</span>
-            <input type="text" id="itemName" required maxlength="60" placeholder="Ej. Pechuga de pollo, Proteína whey" />
+            <input type="text" id="itemName" required maxlength="60" placeholder="Escribe ej. Salmón, Claras, Camote, Avena..." autocomplete="off" />
+            <div class="pantry-picker-chips hidden" id="quickFoodMatches"></div>
           </label>
           <label class="field">
             <span>Cantidad actual *</span>
@@ -430,35 +431,39 @@
         <button type="button" class="icon-btn icon-btn-sm" data-close-modal="settingsModal" aria-label="Cerrar">✕</button>
       </div>
       <div class="settings-tabs" role="tablist">
-        <button type="button" class="stab active" data-stab="ai">IA (Gemini)</button>
+        <button type="button" class="stab active" data-stab="ai">⚡ Motor IA</button>
         <button type="button" class="stab" data-stab="profile">Meta fitness</button>
         <button type="button" class="stab" data-stab="sync">Datos y nube</button>
       </div>
       <div class="modal-body">
-        <!-- Tab 1: Gemini AI -->
+        <!-- Tab 1: Multi-Provider Fast AI (Groq 0.3s + Gemini) -->
         <form id="geminiForm" class="stab-panel active" data-stab-panel="ai">
-          <p class="muted small-note">
-            Tu clave se guarda únicamente en este navegador y se envía directo a Google. Consíguela gratis en
-            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>.
+          <div class="segmented" role="group" aria-label="Proveedor de IA" style="width:100%; display:grid; grid-template-columns:1fr 1fr;">
+            <button type="button" class="seg-btn active" data-ai-prov="groq" style="justify-content:center;">⚡ Groq (Ultra rápido · 0.4s)</button>
+            <button type="button" class="seg-btn" data-ai-prov="gemini" style="justify-content:center;">✨ Google Gemini</button>
+          </div>
+          <p class="muted small-note" id="aiProviderHelp">
+            <strong>Groq es gratis y ~10× más rápido</strong> (incluye visión para etiquetas con Llama 4). Saca tu clave <code>gsk_...</code> en 10 segundos en
+            <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer">console.groq.com/keys</a>.
           </p>
           <div class="form-grid">
             <label class="field span-2">
-              <span>Gemini API Key (empieza con AIza...)</span>
+              <span id="aiKeyLabel">API Key (gsk_... de Groq o AIza... de Gemini)</span>
               <div class="inline-row">
-                <input type="password" id="geminiKeyInput" placeholder="Pega aquí tu clave AIza..." autocomplete="off" spellcheck="false" />
+                <input type="password" id="geminiKeyInput" placeholder="Pega tu clave gsk_... o AIza..." autocomplete="off" spellcheck="false" />
                 <button type="button" class="btn btn-ghost btn-sm" id="toggleKeyVisBtn" title="Mostrar u ocultar clave">Ver</button>
               </div>
             </label>
             <label class="field span-2">
-              <span>Modelo (se detecta automáticamente)</span>
+              <span>Modelo activo (automático)</span>
               <div class="inline-row">
-                <input type="text" id="geminiModelInput" list="geminiModelSuggestions" placeholder="gemini-3.8-flash" />
+                <input type="text" id="geminiModelInput" list="geminiModelSuggestions" placeholder="llama-3.3-70b-versatile" />
                 <button type="button" class="btn btn-ghost btn-sm" id="detectModelsBtn">Detectar</button>
               </div>
               <datalist id="geminiModelSuggestions">
-                <option value="gemini-3.8-flash-lite"></option>
+                <option value="llama-3.3-70b-versatile"></option>
+                <option value="meta-llama/llama-4-scout-17b-16e-instruct"></option>
                 <option value="gemini-3.8-flash"></option>
-                <option value="gemini-3.8-pro"></option>
               </datalist>
             </label>
           </div>
@@ -560,6 +565,6 @@
   <!-- Toast Container -->
   <div class="toast-container" id="toastContainer" aria-live="polite"></div>
 
-  <script type="module" src="app.js?v=20"></script>
+  <script type="module" src="app.js?v=21"></script>
 </body>
 </html>
