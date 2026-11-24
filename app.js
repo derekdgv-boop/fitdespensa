@@ -30,7 +30,7 @@ import {
   recognizeProduct,
   runCoachTurn,
   setGeminiConfig,
-} from './ai.js?v=15';
+} from './ai.js?v=16';
 import {
   esc,
   formatCoachText,
@@ -1145,7 +1145,7 @@ function bindEvents() {
       $('geminiModelInput').value = info.model;
       state.aiRecsError = null;
       renderAll();
-      out.innerHTML = `<strong style="color:var(--ok)">✅ ¡Conectado con éxito!</strong> Modelo activo: <code>${esc(info.model)}</code> (${info.availableCount} disponibles).`;
+      out.innerHTML = `<strong style="color:var(--ok)">✅ ¡Conectado con éxito!</strong> Modelo activo: <code>${esc(info.model)}</code>.`;
       toast('¡IA de Gemini conectada y lista!');
       if (closeOnSuccess) {
         setTimeout(() => {

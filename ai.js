@@ -9,7 +9,11 @@ import { DEFAULT_GEMINI_MODEL } from './firebase-config.js?v=7';
 const KEY_STORAGE = 'fitdespensa_gemini_key';
 const MODEL_STORAGE = 'fitdespensa_gemini_model';
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
-const DEPRECATED_MODELS = new Set(['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']);
+
+function isDeprecatedModel(name) {
+  const m = String(name || '').toLowerCase().replace(/^models\//, '');
+  return m.startsWith('gemini-1.') || m.startsWith('gemini-2.0') || m.startsWith('gemini-2.5');
+}
 
 const memFallback = { key: '', model: DEFAULT_GEMINI_MODEL };
 
@@ -42,7 +46,7 @@ export function sanitizeApiKey(raw) {
 
 export function getGeminiConfig() {
   let savedModel = safeGet(MODEL_STORAGE).trim().replace(/^models\//, '');
-  if (!savedModel || DEPRECATED_MODELS.has(savedModel)) {
+  if (!savedModel || isDeprecatedModel(savedModel)) {
     savedModel = DEFAULT_GEMINI_MODEL;
     safeSet(MODEL_STORAGE, savedModel);
   }
@@ -67,7 +71,7 @@ export const hasGeminiKey = () => Boolean(getGeminiConfig().apiKey);
 export async function listGeminiModels() {
   const { apiKey } = getGeminiConfig();
   if (!apiKey) throw new Error('Primero pega tu API key de Gemini.');
-  const res = await fetch(`${API_BASE}?key=${encodeURIComponent(apiKey)}`);
+  const res = await fetch(`${API_BASE}?pageSize=1000&key=${encodeURIComponent(apiKey)}`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data?.error?.message || `Error ${res.status} al validar tu clave en Google`);
@@ -75,18 +79,18 @@ export async function listGeminiModels() {
   return (data.models || [])
     .filter((m) => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
     .map((m) => String(m.name || '').replace(/^models\//, ''))
-    .filter((name) => name.includes('gemini'));
+    .filter((name) => name.includes('gemini') && !isDeprecatedModel(name));
 }
 
 function pickBestFlashModel(models, exclude = '') {
-  const pool = models.filter((m) => m !== exclude && !DEPRECATED_MODELS.has(m));
+  const pool = models.filter((m) => m !== exclude && !isDeprecatedModel(m));
   return (
     pool.find((m) => m === 'gemini-3.8-flash') ||
+    pool.find((m) => m.includes('3.8') && m.includes('flash')) ||
     pool.find((m) => m.includes('3.') && m.includes('flash')) ||
     pool.find((m) => m.includes('flash')) ||
     pool[0] ||
-    models[0] ||
-    null
+    DEFAULT_GEMINI_MODEL
   );
 }
 
@@ -109,6 +113,17 @@ async function callGemini(body) {
   }
 
   let attempt = await rawGenerate(apiKey, model, body);
+  if (!attempt.ok) {
+    const errMsg = String(attempt.data?.error?.message || '');
+    // If Google explicitly tells us which replacement model to use, switch to it immediately!
+    const suggestedMatch = errMsg.match(/models\/(gemini-[a-zA-Z0-9._-]+)/);
+    if (suggestedMatch && suggestedMatch[1] && suggestedMatch[1] !== model) {
+      const suggested = suggestedMatch[1];
+      setGeminiConfig({ model: suggested });
+      attempt = await rawGenerate(apiKey, suggested, body);
+    }
+  }
+
   if (!attempt.ok) {
     const errMsg = String(attempt.data?.error?.message || '');
     const isModelError =
@@ -171,20 +186,14 @@ export async function connectAndVerifyGemini(rawKey, preferredModel = '') {
   if (!cleanKey) {
     throw new Error('Pega primero tu API Key (empieza con AIza...) en el campo de arriba.');
   }
-  setGeminiConfig({ apiKey: cleanKey, model: preferredModel || undefined });
+  const cleanPref = String(preferredModel || '').trim().replace(/^models\//, '');
+  const targetModel = !cleanPref || isDeprecatedModel(cleanPref) ? DEFAULT_GEMINI_MODEL : cleanPref;
+  setGeminiConfig({ apiKey: cleanKey, model: targetModel });
 
-  // 1) List available models for this exact key to pick a guaranteed-valid model
-  const models = await listGeminiModels();
-  if (!models.length) {
-    throw new Error('La clave es válida pero no tiene modelos Gemini habilitados en Google AI Studio.');
-  }
-  const current = getGeminiConfig().model;
-  const chosen = models.includes(current) ? current : pickBestFlashModel(models) || models[0];
-  setGeminiConfig({ apiKey: cleanKey, model: chosen });
-
-  // 2) Run a lightweight generation test
+  // Test generation directly first (callGemini will auto-upgrade if Google suggests a newer model!)
   await testGeminiConnection();
-  return { apiKey: cleanKey, model: chosen, availableCount: models.length };
+  const finalModel = getGeminiConfig().model;
+  return { apiKey: cleanKey, model: finalModel };
 }
 
 export async function testGeminiConnection() {
