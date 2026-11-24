@@ -1,5 +1,5 @@
 // app.js — FitDespensa AI-First orchestrator (Multimodal Coach, Voice, Recipes, Pantry)
-import { CATEGORIES, MEALS, UNITS } from './constants.js';
+import { CATEGORIES, MEALS, UNITS } from './constants.js?v=11';
 import {
   STATUS_LABEL,
   inShoppingList,
@@ -9,7 +9,7 @@ import {
   statusOf,
   stepFor,
   toBuy,
-} from './inventory.js';
+} from './inventory.js?v=11';
 import {
   ACTIVITY_LEVELS,
   GOALS,
@@ -23,18 +23,19 @@ import {
   lookupBarcode,
   pantryTotals,
   todayStr,
-} from './nutrition.js?v=10';
+} from './nutrition.js?v=11';
 import { getHouseholdCode, initStorage, setHouseholdCode } from './storage.js?v=10';
 import { canUseWebcam, compressFile, dataUrlByteSize, isMobileDevice, startBarcodeScanner, startWebcam } from './camera.js?v=10';
 import {
   getGeminiConfig,
   hasGeminiKey,
   listGeminiModels,
+  recognizeMealPhoto,
   recognizeProduct,
   runCoachTurn,
   setGeminiConfig,
   testGeminiConnection,
-} from './ai.js?v=8';
+} from './ai.js?v=11';
 import {
   SUPPLEMENTS,
   esc,
@@ -48,7 +49,7 @@ import {
   renderProgress,
   renderRecipes,
   renderShoppingList,
-} from './ui.js?v=10';
+} from './ui.js?v=11';
 
 const SVG_SUN = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>`;
 const SVG_MOON = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>`;
@@ -87,6 +88,8 @@ const state = {
   unsubWater: null,
   unsubDayMeta: null,
   barcodeScanner: null,
+  mealTray: [],
+  mealTrayPhoto: null,
   currentPhoto: null,
   currentRecipePhoto: null,
   pendingChatPhoto: null,
@@ -478,9 +481,16 @@ function openItemModal(item = null) {
   $('itemServing').value = item?.serving || '';
   $('itemServingsPerUnit').value = item?.servingsPerUnit ?? '';
   $('itemKcal').value = item?.kcal ?? '';
+  $('itemSodium').value = item?.sodium ?? '';
   $('itemProtein').value = item?.protein ?? '';
+  $('itemProteinType').value = item?.proteinType || 'animal';
   $('itemCarbs').value = item?.carbs ?? '';
+  $('itemCarbType').value = item?.carbType || 'complejo';
+  $('itemFiber').value = item?.fiber ?? '';
+  $('itemSugar').value = item?.sugar ?? '';
   $('itemFat').value = item?.fat ?? '';
+  $('itemSatFat').value = item?.satFat ?? '';
+  $('itemUnsatFat').value = item?.unsatFat ?? '';
   $('deleteItemBtn').classList.toggle('hidden', !item);
   setModalPhoto(item?.photo || null);
   $('itemModal').classList.remove('hidden');
@@ -514,7 +524,12 @@ async function handlePhotoFile(file, target = 'item') {
       toast('Foto agregada a la receta');
     } else {
       setModalPhoto(dataUrl);
-      toast('Foto agregada');
+      if (hasGeminiKey()) {
+        toast('Foto cargada · autocompletando tabla nutrimental...');
+        scanCurrentPhoto();
+      } else {
+        toast('Foto agregada (agrega tu clave de Gemini para autocompletar macros)');
+      }
     }
   } catch (err) {
     toast(err.message);
@@ -559,7 +574,8 @@ async function scanCurrentPhoto() {
   }
   const btn = $('scanPhotoBtn');
   btn.disabled = true;
-  btn.textContent = 'Analizando imagen...';
+  btn.textContent = '✨ Analizando tabla...';
+  $('photoMeta').textContent = 'Gemini está leyendo la tabla nutrimental...';
   try {
     const data = await recognizeProduct(state.currentPhoto);
     if (data.name) $('itemName').value = data.name;
@@ -569,58 +585,152 @@ async function scanCurrentPhoto() {
     if (data.servingsPerUnit != null) $('itemServingsPerUnit').value = data.servingsPerUnit;
     if (data.kcal != null) $('itemKcal').value = data.kcal;
     if (data.protein != null) $('itemProtein').value = data.protein;
+    if (data.proteinType) $('itemProteinType').value = data.proteinType;
     if (data.carbs != null) $('itemCarbs').value = data.carbs;
+    if (data.carbType) $('itemCarbType').value = data.carbType;
+    if (data.fiber != null) $('itemFiber').value = data.fiber;
+    if (data.sugar != null) $('itemSugar').value = data.sugar;
     if (data.fat != null) $('itemFat').value = data.fat;
-    toast('Datos detectados con Gemini. Revisa y guarda.');
+    if (data.satFat != null) $('itemSatFat').value = data.satFat;
+    if (data.unsatFat != null) $('itemUnsatFat').value = data.unsatFat;
+    if (data.sodium != null) $('itemSodium').value = data.sodium;
+    $('nutritionDetails').open = true;
+    $('photoMeta').textContent = 'Tabla nutrimental autocompletada con Gemini';
+    toast('¡Tabla nutrimental autocompletada!');
   } catch (err) {
+    $('photoMeta').textContent = 'Error al escanear: ' + err.message;
     toast('Error al escanear: ' + err.message);
   } finally {
     btn.disabled = false;
-    btn.textContent = '✨ Autocompletar con Gemini';
+    btn.textContent = '✨ Re-escanear tabla con IA';
   }
 }
 
 // =========================================================================
-// Log Food Modal
+// Multi-Item Meal Composer Modal (#logModal)
 // =========================================================================
 function openLogModal(preselectedItemId = '', preselectedMeal = '') {
   $('logForm').reset();
   $('logMeal').value = preselectedMeal || defaultMeal();
-  $('logServings').value = 1;
+  $('logDeduct').checked = true;
+  $('logSaveAsRecipe').checked = false;
+  $('logPantrySearch').value = '';
+  state.mealTray = [];
+  state.mealTrayPhoto = null;
 
-  const select = $('logItemSelect');
-  const sorted = [...state.items].sort((a, b) => a.name.localeCompare(b.name, 'es'));
-  select.innerHTML =
-    `<option value="">— Alimento manual (fuera de despensa) —</option>` +
-    sorted
-      .map(
-        (it) =>
-          `<option value="${esc(it.id)}">${esc(it.name)} (${round(it.qty, 2)} ${esc(it.unit)} · ${it.protein ?? 0}g PRO)</option>`
-      )
-      .join('');
-
-  select.value = preselectedItemId || '';
-  syncLogFormFromItem();
+  if (preselectedItemId) {
+    const it = state.items.find((x) => x.id === preselectedItemId);
+    if (it) addPantryItemToTray(it);
+  }
+  renderLogPantryChips();
+  renderLogTray();
   $('logModal').classList.remove('hidden');
 }
 
-function syncLogFormFromItem() {
-  const itemId = $('logItemSelect').value;
-  const servings = Math.max(0.1, Number($('logServings').value) || 1);
-  const item = state.items.find((i) => i.id === itemId);
+function renderLogPantryChips() {
+  const q = normText($('logPantrySearch').value);
+  const filtered = [...state.items]
+    .filter((it) => !q || normText(it.name).includes(q) || normText(it.category).includes(q))
+    .sort((a, b) => a.name.localeCompare(b.name, 'es'))
+    .slice(0, 24);
 
-  if (item) {
-    const res = consumeFromItem(item, servings);
-    $('logName').value = item.name;
-    $('logKcal').value = res.macros.kcal;
-    $('logProtein').value = res.macros.protein;
-    $('logCarbs').value = res.macros.carbs;
-    $('logFat').value = res.macros.fat;
-    $('logDeductRow').classList.remove('hidden');
-    $('logDeductLabel').textContent = `Descontar ${res.unitsUsed} ${item.unit} de "${item.name}"`;
-  } else {
-    $('logDeductRow').classList.add('hidden');
+  const box = $('logPantryChips');
+  if (!filtered.length) {
+    box.innerHTML = `<span class="muted small-note">Sin coincidencias en tu despensa. Usa «+ Agregar alimento manual» o «📷 Foto del plato».</span>`;
+    return;
   }
+  box.innerHTML = filtered
+    .map(
+      (it) =>
+        `<button type="button" class="picker-chip" data-pick-item="${esc(it.id)}">+ ${esc(it.name)}${it.protein ? ` · ${it.protein}g P` : ''}</button>`
+    )
+    .join('');
+}
+
+function addPantryItemToTray(it) {
+  const existing = state.mealTray.find((t) => t.itemId === it.id);
+  if (existing) {
+    existing.servings = round(existing.servings + 1, 2);
+  } else {
+    state.mealTray.push({
+      uid: 't-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+      itemId: it.id,
+      name: it.name,
+      servings: 1,
+      perServing: {
+        kcal: Number(it.kcal) || 0,
+        protein: Number(it.protein) || 0,
+        proteinType: it.proteinType || 'animal',
+        carbs: Number(it.carbs) || 0,
+        carbType: it.carbType || 'complejo',
+        fiber: Number(it.fiber) || 0,
+        sugar: Number(it.sugar) || 0,
+        fat: Number(it.fat) || 0,
+        satFat: Number(it.satFat) || 0,
+        unsatFat: it.unsatFat != null ? Number(it.unsatFat) || 0 : Math.max(0, (Number(it.fat) || 0) - (Number(it.satFat) || 0)),
+        sodium: Number(it.sodium) || 0,
+      },
+    });
+  }
+  renderLogTray();
+}
+
+function scaledTrayItem(t) {
+  const s = Math.max(0.25, Number(t.servings) || 1);
+  const p = t.perServing;
+  return {
+    kcal: round(p.kcal * s, 1),
+    protein: round(p.protein * s, 1),
+    proteinType: p.proteinType || 'animal',
+    carbs: round(p.carbs * s, 1),
+    carbType: p.carbType || 'complejo',
+    fiber: round((p.fiber || 0) * s, 1),
+    sugar: round((p.sugar || 0) * s, 1),
+    fat: round(p.fat * s, 1),
+    satFat: round((p.satFat || 0) * s, 1),
+    unsatFat: round((p.unsatFat || 0) * s, 1),
+    sodium: Math.round((p.sodium || 0) * s),
+  };
+}
+
+function renderLogTray() {
+  const listEl = $('logTrayList');
+  const count = state.mealTray.length;
+  $('trayTitle').textContent = `En esta comida (${count} ${count === 1 ? 'alimento' : 'alimentos'})`;
+  $('saveMealTrayBtn').textContent = count > 1 ? `Guardar comida (${count})` : 'Guardar comida';
+
+  if (!count) {
+    $('trayTotals').textContent = '0 kcal · 0g PRO';
+    listEl.innerHTML = `<p class="muted small-note">Toca varios productos arriba o escanea la foto de tu plato para armar tu comida.</p>`;
+    return;
+  }
+
+  let totKcal = 0, totP = 0, totC = 0, totF = 0;
+  listEl.innerHTML = state.mealTray
+    .map((t) => {
+      const m = scaledTrayItem(t);
+      totKcal += m.kcal;
+      totP += m.protein;
+      totC += m.carbs;
+      totF += m.fat;
+      return `
+        <div class="tray-row">
+          <div style="flex:1; min-width:0;">
+            <strong style="font-size:0.86rem; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(t.name)}</strong>
+            <span class="muted small-note num">${Math.round(m.kcal)} kcal · P ${m.protein}g · C ${m.carbs}g · G ${m.fat}g</span>
+          </div>
+          <div class="stepper">
+            <button type="button" class="step-btn" data-tray-step="-0.5" data-uid="${esc(t.uid)}">−</button>
+            <span class="qty-text" style="min-width:34px;">${t.servings}</span>
+            <button type="button" class="step-btn" data-tray-step="0.5" data-uid="${esc(t.uid)}">+</button>
+          </div>
+          <button type="button" class="icon-btn icon-btn-sm" data-tray-remove="${esc(t.uid)}" aria-label="Quitar">✕</button>
+        </div>
+      `;
+    })
+    .join('');
+
+  $('trayTotals').textContent = `${Math.round(totKcal)} kcal · P ${round(totP, 1)}g · C ${round(totC, 1)}g · G ${round(totF, 1)}g`;
 }
 
 // =========================================================================
@@ -849,8 +959,15 @@ async function executeCoachTool(name, args) {
       servingsPerUnit: args.servingsPerUnit ?? null,
       kcal: args.kcal ?? null,
       protein: args.protein ?? null,
+      proteinType: args.proteinType || 'animal',
       carbs: args.carbs ?? null,
+      carbType: args.carbType || 'complejo',
+      fiber: args.fiber ?? null,
+      sugar: args.sugar ?? null,
       fat: args.fat ?? null,
+      satFat: args.satFat ?? null,
+      unsatFat: args.unsatFat ?? null,
+      sodium: args.sodium ?? null,
       photo: args.attachChatPhoto ? state.activeTurnPhoto : null,
     });
     return {
@@ -923,6 +1040,8 @@ async function executeCoachTool(name, args) {
         await state.store.saveItem({ ...item, qty: calc.newQty });
       }
     } else {
+      const fat = round(Number(args.fat) || 0, 1);
+      const satFat = round(Number(args.satFat) || 0, 1);
       entryPayload = {
         date,
         meal,
@@ -931,8 +1050,15 @@ async function executeCoachTool(name, args) {
         servings,
         kcal: round(Number(args.kcal) || 0, 1),
         protein: round(Number(args.protein) || 0, 1),
+        proteinType: args.proteinType || 'animal',
         carbs: round(Number(args.carbs) || 0, 1),
-        fat: round(Number(args.fat) || 0, 1),
+        carbType: args.carbType || 'complejo',
+        fiber: round(Number(args.fiber) || 0, 1),
+        sugar: round(Number(args.sugar) || 0, 1),
+        fat,
+        satFat,
+        unsatFat: args.unsatFat != null ? round(Number(args.unsatFat) || 0, 1) : Math.max(0, round(fat - satFat, 1)),
+        sodium: Math.round(Number(args.sodium) || 0),
         unitsUsed: 0,
       };
     }
@@ -1353,9 +1479,14 @@ function bindEvents() {
       if (p.kcal != null) $('itemKcal').value = p.kcal;
       if (p.protein != null) $('itemProtein').value = p.protein;
       if (p.carbs != null) $('itemCarbs').value = p.carbs;
+      if (p.fiber != null) $('itemFiber').value = p.fiber;
+      if (p.sugar != null) $('itemSugar').value = p.sugar;
       if (p.fat != null) $('itemFat').value = p.fat;
+      if (p.satFat != null) $('itemSatFat').value = p.satFat;
+      if (p.unsatFat != null) $('itemUnsatFat').value = p.unsatFat;
+      if (p.sodium != null) $('itemSodium').value = p.sodium;
       $('nutritionDetails').open = true;
-      toast(`Encontrado: ${p.name}`);
+      toast(`Tabla nutrimental cargada: ${p.name}`);
     } catch (err) {
       toast(err.message);
     } finally {
@@ -1411,7 +1542,12 @@ function bindEvents() {
       const dataUrl = state.webcam.capture();
       setModalPhoto(dataUrl);
       closeCameraModal();
-      toast('Foto capturada');
+      if (hasGeminiKey()) {
+        toast('Foto capturada · autocompletando tabla nutrimental...');
+        scanCurrentPhoto();
+      } else {
+        toast('Foto capturada');
+      }
     } catch (err) {
       toast(err.message);
     }
@@ -1432,8 +1568,15 @@ function bindEvents() {
       servingsPerUnit: $('itemServingsPerUnit').value,
       kcal: $('itemKcal').value,
       protein: $('itemProtein').value,
+      proteinType: $('itemProteinType').value,
       carbs: $('itemCarbs').value,
+      carbType: $('itemCarbType').value,
+      fiber: $('itemFiber').value,
+      sugar: $('itemSugar').value,
       fat: $('itemFat').value,
+      satFat: $('itemSatFat').value,
+      unsatFat: $('itemUnsatFat').value,
+      sodium: $('itemSodium').value,
       photo: state.currentPhoto,
     });
     $('itemModal').classList.add('hidden');
@@ -1448,39 +1591,177 @@ function bindEvents() {
     toast('Producto eliminado');
   });
 
-  $('logItemSelect').addEventListener('change', syncLogFormFromItem);
-  $('logServings').addEventListener('input', syncLogFormFromItem);
+  // Multi-item Meal Composer events
+  $('logPantrySearch').addEventListener('input', renderLogPantryChips);
+  $('logPantryChips').addEventListener('click', (e) => {
+    const chip = e.target.closest('[data-pick-item]');
+    if (!chip) return;
+    const it = state.items.find((x) => x.id === chip.dataset.pickItem);
+    if (it) addPantryItemToTray(it);
+  });
+
+  $('logTrayList').addEventListener('click', (e) => {
+    const stepBtn = e.target.closest('[data-tray-step]');
+    if (stepBtn) {
+      const t = state.mealTray.find((x) => x.uid === stepBtn.dataset.uid);
+      if (t) {
+        t.servings = Math.max(0.25, round(t.servings + Number(stepBtn.dataset.trayStep), 2));
+        renderLogTray();
+      }
+      return;
+    }
+    const remBtn = e.target.closest('[data-tray-remove]');
+    if (remBtn) {
+      state.mealTray = state.mealTray.filter((x) => x.uid !== remBtn.dataset.trayRemove);
+      renderLogTray();
+    }
+  });
+
+  $('addManualToTrayBtn').addEventListener('click', () => {
+    const name = $('logManualName').value.trim();
+    if (!name) return toast('Escribe el nombre del alimento');
+    const fat = Number($('logManualFat').value) || 0;
+    const satFat = Number($('logManualSatFat').value) || 0;
+    state.mealTray.push({
+      uid: 'm-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+      itemId: null,
+      name,
+      servings: 1,
+      perServing: {
+        kcal: Number($('logManualKcal').value) || 0,
+        protein: Number($('logManualProtein').value) || 0,
+        proteinType: $('logManualProtType').value || 'animal',
+        carbs: Number($('logManualCarbs').value) || 0,
+        carbType: $('logManualCarbType').value || 'complejo',
+        fiber: Number($('logManualFiber').value) || 0,
+        sugar: 0,
+        fat,
+        satFat,
+        unsatFat: Math.max(0, round(fat - satFat, 1)),
+        sodium: 0,
+      },
+    });
+    ['logManualName', 'logManualKcal', 'logManualProtein', 'logManualCarbs', 'logManualFiber', 'logManualFat', 'logManualSatFat'].forEach(
+      (id) => { $(id).value = ''; }
+    );
+    renderLogTray();
+    toast(`"${name}" agregado al plato`);
+  });
+
+  $('scanMealPhotoBtn').addEventListener('click', () => {
+    if (!hasGeminiKey()) {
+      toast('Configura tu API key de Gemini en Ajustes primero.');
+      openSettingsModal('ai');
+      return;
+    }
+    $('mealPhotoInput').click();
+  });
+
+  $('mealPhotoInput').addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const btn = $('scanMealPhotoBtn');
+    btn.disabled = true;
+    btn.textContent = '✨ Analizando plato...';
+    try {
+      const dataUrl = await compressFile(file);
+      state.mealTrayPhoto = dataUrl;
+      const detected = await recognizeMealPhoto(dataUrl);
+      if (!detected.length) return toast('No se detectaron alimentos en la foto');
+      for (const d of detected) {
+        const fat = Number(d.fat) || 0;
+        const satFat = Number(d.satFat) || 0;
+        state.mealTray.push({
+          uid: 'ai-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+          itemId: null,
+          name: d.name,
+          servings: Number(d.servings) || 1,
+          perServing: {
+            kcal: Number(d.kcal) || 0,
+            protein: Number(d.protein) || 0,
+            proteinType: d.proteinType || 'animal',
+            carbs: Number(d.carbs) || 0,
+            carbType: d.carbType || 'complejo',
+            fiber: Number(d.fiber) || 0,
+            sugar: Number(d.sugar) || 0,
+            fat,
+            satFat,
+            unsatFat: d.unsatFat != null ? Number(d.unsatFat) || 0 : Math.max(0, round(fat - satFat, 1)),
+            sodium: Number(d.sodium) || 0,
+          },
+        });
+      }
+      renderLogTray();
+      toast(`${detected.length} alimentos detectados del plato`);
+    } catch (err) {
+      toast('Error al escanear plato: ' + err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '📷 Foto del plato (IA)';
+    }
+  });
+
   $('logForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const itemId = $('logItemSelect').value || null;
-    const servings = Math.max(0.1, Number($('logServings').value) || 1);
-    const name = $('logName').value.trim();
-    if (!name) return toast('Escribe el nombre del alimento');
+    if (!state.mealTray.length) {
+      return toast('Agrega al menos un alimento al plato');
+    }
+    const meal = $('logMeal').value;
+    const deduct = $('logDeduct').checked;
+    const saveAsRecipe = $('logSaveAsRecipe').checked;
 
-    let unitsUsed = 0;
-    if (itemId && $('logDeduct').checked) {
-      const it = state.items.find((x) => x.id === itemId);
-      if (it) {
-        const calc = consumeFromItem(it, servings);
-        unitsUsed = calc.unitsUsed;
-        await state.store.saveItem({ ...it, qty: calc.newQty });
+    const loggedNames = [];
+    let sumKcal = 0, sumP = 0, sumC = 0, sumF = 0;
+
+    for (const t of state.mealTray) {
+      const m = scaledTrayItem(t);
+      let unitsUsed = 0;
+      if (t.itemId && deduct) {
+        const it = state.items.find((x) => x.id === t.itemId);
+        if (it) {
+          const calc = consumeFromItem(it, t.servings);
+          unitsUsed = calc.unitsUsed;
+          await state.store.saveItem({ ...it, qty: calc.newQty });
+        }
       }
+      await state.store.addLog({
+        date: state.diaryDate,
+        meal,
+        itemId: t.itemId,
+        name: t.name,
+        servings: t.servings,
+        ...m,
+        unitsUsed,
+      });
+      loggedNames.push(t.name);
+      sumKcal += m.kcal;
+      sumP += m.protein;
+      sumC += m.carbs;
+      sumF += m.fat;
     }
 
-    await state.store.addLog({
-      date: state.diaryDate,
-      meal: $('logMeal').value,
-      itemId,
-      name,
-      servings,
-      kcal: Number($('logKcal').value) || 0,
-      protein: Number($('logProtein').value) || 0,
-      carbs: Number($('logCarbs').value) || 0,
-      fat: Number($('logFat').value) || 0,
-      unitsUsed,
-    });
+    if (saveAsRecipe) {
+      const mealLabel = (MEALS.find((x) => x.id === meal) || MEALS[1]).label;
+      await state.store.saveRecipe({
+        name: loggedNames.length === 1 ? loggedNames[0] : `${mealLabel}: ${loggedNames.slice(0, 2).join(' + ')}`,
+        meal,
+        kcal: Math.round(sumKcal),
+        protein: round(sumP, 1),
+        carbs: round(sumC, 1),
+        fat: round(sumF, 1),
+        ingredients: state.mealTray.map((t) => `${t.servings}× ${t.name}`),
+        photo: state.mealTrayPhoto || null,
+      });
+    }
+
+    refreshAnalytics();
     $('logModal').classList.add('hidden');
-    toast('Comida registrada');
+    toast(
+      saveAsRecipe
+        ? `Comida (${state.mealTray.length} alimentos) registrada y guardada como receta`
+        : `Comida registrada (${state.mealTray.length} ${state.mealTray.length === 1 ? 'alimento' : 'alimentos'})`
+    );
   });
 
   $('profileForm').addEventListener('input', updateProfilePreview);

@@ -91,13 +91,20 @@ const PRODUCT_SCHEMA = {
     category: { type: 'STRING', enum: CATEGORY_NAMES },
     unit: { type: 'STRING', enum: UNITS },
     serving: { type: 'STRING', description: 'Descripción de 1 porción, ej. "1 scoop (30 g)" o "100 g"' },
-    servingsPerUnit: { type: 'NUMBER', description: 'Cantidad aproximada de porciones por unidad/envase' },
+    servingsPerUnit: { type: 'NUMBER', description: 'Cantidad aproximada de porciones por envase/unidad' },
     kcal: { type: 'NUMBER', description: 'Calorías por porción' },
     protein: { type: 'NUMBER', description: 'Gramos de proteína por porción' },
-    carbs: { type: 'NUMBER', description: 'Gramos de carbohidratos por porción' },
-    fat: { type: 'NUMBER', description: 'Gramos de grasa por porción' },
+    proteinType: { type: 'STRING', enum: ['animal', 'vegetal', 'suplemento'], description: 'Fuente principal de proteína' },
+    carbs: { type: 'NUMBER', description: 'Gramos totales de carbohidratos por porción' },
+    carbType: { type: 'STRING', enum: ['complejo', 'simple', 'fibroso'], description: 'Tipo principal de carbohidrato' },
+    fiber: { type: 'NUMBER', description: 'Gramos de fibra dietética por porción' },
+    sugar: { type: 'NUMBER', description: 'Gramos de azúcares por porción' },
+    fat: { type: 'NUMBER', description: 'Gramos totales de grasa por porción' },
+    satFat: { type: 'NUMBER', description: 'Gramos de grasa saturada por porción' },
+    unsatFat: { type: 'NUMBER', description: 'Gramos de grasas saludables/insaturadas por porción' },
+    sodium: { type: 'NUMBER', description: 'Miligramos (mg) de sodio por porción' },
   },
-  required: ['name', 'category', 'unit'],
+  required: ['name', 'category', 'unit', 'kcal', 'protein', 'carbs', 'fat'],
 };
 
 export async function recognizeProduct(photoDataUrl) {
@@ -106,10 +113,12 @@ export async function recognizeProduct(photoDataUrl) {
 
   const [, mimeType, data] = match;
   const prompt = [
-    'Analiza esta foto de un producto de despensa o alimento (puede ser el envase, el alimento o su tabla nutrimental).',
-    'Devuelve sus datos en español para un inventario fitness.',
-    'Si se ve la tabla nutrimental, úsala con precisión; si no, estima valores estándar realistas por porción.',
-    'Si es un artículo de limpieza/hogar (no comestible), deja kcal/protein/carbs/fat en 0 y servingsPerUnit en 1.',
+    'Analiza esta foto de un alimento, empaque o tabla nutrimental.',
+    'Extrae o estima con alta precisión TODOS los valores de su tabla nutrimental por porción en español:',
+    'calorías, proteína y su tipo (animal/vegetal/suplemento), carbohidratos y su tipo (complejo/simple/fibroso),',
+    'fibra, azúcares, grasas totales, grasas saturadas, grasas insaturadas/saludables y sodio (mg).',
+    'Si se ve la tabla nutrimental impresa, copia los números exactos. Si es un alimento fresco, usa valores estándar USDA.',
+    'Si es un artículo de limpieza/hogar (no comestible), deja todos los macros en 0 y servingsPerUnit en 1.',
   ].join(' ');
 
   const res = await callGemini({
@@ -125,13 +134,78 @@ export async function recognizeProduct(photoDataUrl) {
     generationConfig: {
       responseMimeType: 'application/json',
       responseSchema: PRODUCT_SCHEMA,
+      temperature: 0.15,
+    },
+  });
+
+  const text = res?.candidates?.[0]?.content?.parts?.find((p) => p.text && !p.thought)?.text;
+  if (!text) throw new Error('Gemini no devolvió datos del producto.');
+  return JSON.parse(text);
+}
+
+const MEAL_PHOTO_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    items: {
+      type: 'ARRAY',
+      description: 'Lista de cada alimento individual visible en el plato o comida',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          name: { type: 'STRING', description: 'Nombre del alimento con porción estimada, ej. "Pechuga a la plancha (150 g)"' },
+          servings: { type: 'NUMBER', description: 'Porciones (normalmente 1)' },
+          kcal: { type: 'NUMBER' },
+          protein: { type: 'NUMBER' },
+          proteinType: { type: 'STRING', enum: ['animal', 'vegetal', 'suplemento'] },
+          carbs: { type: 'NUMBER' },
+          carbType: { type: 'STRING', enum: ['complejo', 'simple', 'fibroso'] },
+          fiber: { type: 'NUMBER' },
+          sugar: { type: 'NUMBER' },
+          fat: { type: 'NUMBER' },
+          satFat: { type: 'NUMBER' },
+          unsatFat: { type: 'NUMBER' },
+          sodium: { type: 'NUMBER' },
+        },
+        required: ['name', 'kcal', 'protein', 'carbs', 'fat'],
+      },
+    },
+  },
+  required: ['items'],
+};
+
+/** Detects ALL separate foods on a plated meal photo with detailed macro subtypes. */
+export async function recognizeMealPhoto(photoDataUrl) {
+  const match = String(photoDataUrl || '').match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!match) throw new Error('Foto inválida para analizar.');
+
+  const [, mimeType, data] = match;
+  const prompt = [
+    'Identifica CADA alimento por separado que aparece en esta foto de comida (por ejemplo: pollo, arroz, aguacate, ensalada).',
+    'Para cada alimento estima porción realista y sus macros completos: kcal, proteína + tipo (animal/vegetal/suplemento),',
+    'carbohidratos + tipo (complejo/simple/fibroso), fibra, azúcares, grasas totales, saturadas, insaturadas y sodio (mg).',
+  ].join(' ');
+
+  const res = await callGemini({
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { text: prompt },
+          { inlineData: { mimeType, data } },
+        ],
+      },
+    ],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: MEAL_PHOTO_SCHEMA,
       temperature: 0.2,
     },
   });
 
-  const text = res?.candidates?.[0]?.content?.parts?.find((p) => p.text)?.text;
-  if (!text) throw new Error('Gemini no devolvió datos del producto.');
-  return JSON.parse(text);
+  const text = res?.candidates?.[0]?.content?.parts?.find((p) => p.text && !p.thought)?.text;
+  if (!text) throw new Error('Gemini no pudo identificar los alimentos del plato.');
+  const parsed = JSON.parse(text);
+  return Array.isArray(parsed.items) ? parsed.items : [];
 }
 
 // =========================================================================
@@ -207,8 +281,15 @@ const COACH_TOOLS = [
             servingsPerUnit: { type: 'NUMBER' },
             kcal: { type: 'NUMBER' },
             protein: { type: 'NUMBER' },
+            proteinType: { type: 'STRING', enum: ['animal', 'vegetal', 'suplemento'] },
             carbs: { type: 'NUMBER' },
+            carbType: { type: 'STRING', enum: ['complejo', 'simple', 'fibroso'] },
+            fiber: { type: 'NUMBER' },
+            sugar: { type: 'NUMBER' },
             fat: { type: 'NUMBER' },
+            satFat: { type: 'NUMBER' },
+            unsatFat: { type: 'NUMBER' },
+            sodium: { type: 'NUMBER' },
             attachChatPhoto: { type: 'BOOLEAN', description: 'True si el usuario envió foto de este producto' },
           },
           required: ['name', 'qty'],
@@ -251,8 +332,15 @@ const COACH_TOOLS = [
             deductInventory: { type: 'BOOLEAN', description: 'Si descontar de la despensa (default true)' },
             kcal: { type: 'NUMBER', description: 'Solo si el alimento no está en despensa' },
             protein: { type: 'NUMBER', description: 'Solo si el alimento no está en despensa' },
+            proteinType: { type: 'STRING', enum: ['animal', 'vegetal', 'suplemento'] },
             carbs: { type: 'NUMBER', description: 'Solo si el alimento no está en despensa' },
+            carbType: { type: 'STRING', enum: ['complejo', 'simple', 'fibroso'] },
+            fiber: { type: 'NUMBER' },
+            sugar: { type: 'NUMBER' },
             fat: { type: 'NUMBER', description: 'Solo si el alimento no está en despensa' },
+            satFat: { type: 'NUMBER' },
+            unsatFat: { type: 'NUMBER' },
+            sodium: { type: 'NUMBER' },
           },
           required: ['itemName', 'servings'],
         },

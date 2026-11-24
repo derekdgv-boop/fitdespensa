@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23a3e635'/%3E%3Cpath d='M18 4 7 18h8l-1 10 11-14h-8l1-10z' fill='%230a1204'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="style.css?v=10" />
+  <link rel="stylesheet" href="style.css?v=11" />
 </head>
 <body>
   <div class="app-layout">
@@ -312,8 +312,8 @@
               <button type="button" class="btn btn-ghost btn-sm" id="galleryPhotoBtn">Galería</button>
               <button type="button" class="btn btn-ghost btn-sm hidden" id="removePhotoBtn">Quitar</button>
             </div>
-            <button type="button" class="btn btn-accent btn-sm hidden" id="scanPhotoBtn">✨ Autocompletar con Gemini</button>
-            <span class="muted small-note" id="photoMeta">Se comprime automáticamente (~30 KB) junto al producto</span>
+            <button type="button" class="btn btn-accent btn-sm hidden" id="scanPhotoBtn">✨ Re-escanear tabla con IA</button>
+            <span class="muted small-note" id="photoMeta">Al subir foto, Gemini autocompleta la tabla nutrimental automáticamente</span>
           </div>
           <input type="file" id="cameraFileInput" accept="image/*" capture="environment" class="hidden" />
           <input type="file" id="galleryFileInput" accept="image/*" class="hidden" />
@@ -362,7 +362,7 @@
         </details>
 
         <details class="nutrition-details" id="nutritionDetails">
-          <summary>Información nutrimental (opcional)</summary>
+          <summary>Tabla nutrimental completa (autocompletable con foto)</summary>
           <div class="form-grid nutrition-grid">
             <label class="field">
               <span>Porción</span>
@@ -377,16 +377,52 @@
               <input type="number" id="itemKcal" step="any" min="0" placeholder="0" />
             </label>
             <label class="field">
+              <span>Sodio (mg)</span>
+              <input type="number" id="itemSodium" step="any" min="0" placeholder="0" />
+            </label>
+            <label class="field">
               <span>Proteína (g)</span>
               <input type="number" id="itemProtein" step="any" min="0" placeholder="0" />
+            </label>
+            <label class="field">
+              <span>Tipo de proteína</span>
+              <select id="itemProteinType">
+                <option value="animal">Animal</option>
+                <option value="vegetal">Vegetal</option>
+                <option value="suplemento">Suplemento</option>
+              </select>
             </label>
             <label class="field">
               <span>Carbohidratos (g)</span>
               <input type="number" id="itemCarbs" step="any" min="0" placeholder="0" />
             </label>
             <label class="field">
-              <span>Grasas (g)</span>
+              <span>Tipo de carbohidrato</span>
+              <select id="itemCarbType">
+                <option value="complejo">Complejos</option>
+                <option value="simple">Simples / Azúcares</option>
+                <option value="fibroso">Fibrosos (verduras)</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Fibra (g)</span>
+              <input type="number" id="itemFiber" step="any" min="0" placeholder="0" />
+            </label>
+            <label class="field">
+              <span>Azúcares (g)</span>
+              <input type="number" id="itemSugar" step="any" min="0" placeholder="0" />
+            </label>
+            <label class="field">
+              <span>Grasas totales (g)</span>
               <input type="number" id="itemFat" step="any" min="0" placeholder="0" />
+            </label>
+            <label class="field">
+              <span>Grasa saturada (g)</span>
+              <input type="number" id="itemSatFat" step="any" min="0" placeholder="0" />
+            </label>
+            <label class="field span-2">
+              <span>Grasa saludable / insaturada (g)</span>
+              <input type="number" id="itemUnsatFat" step="any" min="0" placeholder="0" />
             </label>
           </div>
         </details>
@@ -491,58 +527,106 @@
     </div>
   </div>
 
-  <!-- MODAL: Registrar Comida -->
+  <!-- MODAL: Armar Comida (Multi-alimentos + Escáner de plato IA) -->
   <div class="modal-backdrop hidden" id="logModal" role="dialog" aria-modal="true" aria-labelledby="logModalTitle">
-    <div class="modal">
+    <div class="modal modal-lg">
       <div class="modal-header">
-        <h2 id="logModalTitle">Registrar comida</h2>
+        <h2 id="logModalTitle">Armar comida (varios alimentos)</h2>
         <button type="button" class="icon-btn icon-btn-sm" data-close-modal="logModal" aria-label="Cerrar">✕</button>
       </div>
       <form id="logForm" class="modal-body">
-        <div class="form-grid">
-          <label class="field span-2">
+        <div class="inline-row" style="align-items:flex-end; flex-wrap:wrap;">
+          <label class="field flex-1" style="min-width:160px;">
             <span>Momento del día</span>
             <select id="logMeal"></select>
           </label>
-          <label class="field span-2">
-            <span>Elegir de tu despensa</span>
-            <select id="logItemSelect"></select>
-          </label>
-          <label class="field span-2">
-            <span>Nombre del alimento *</span>
-            <input type="text" id="logName" maxlength="60" placeholder="Ej. Tacos de pollo, licuado..." />
-          </label>
-          <label class="field">
-            <span>Porciones *</span>
-            <input type="number" id="logServings" step="any" min="0.1" value="1" required />
-          </label>
-          <label class="field">
-            <span>Calorías (kcal)</span>
-            <input type="number" id="logKcal" step="any" min="0" value="0" />
-          </label>
-          <label class="field">
-            <span>Proteína (g)</span>
-            <input type="number" id="logProtein" step="any" min="0" value="0" />
-          </label>
-          <label class="field">
-            <span>Carbohidratos (g)</span>
-            <input type="number" id="logCarbs" step="any" min="0" value="0" />
-          </label>
-          <label class="field">
-            <span>Grasas (g)</span>
-            <input type="number" id="logFat" step="any" min="0" value="0" />
-          </label>
+          <button type="button" class="btn btn-accent btn-sm" id="scanMealPhotoBtn">📷 Foto del plato (IA)</button>
+          <input type="file" id="mealPhotoInput" accept="image/*" capture="environment" class="hidden" />
         </div>
 
-        <label class="checkbox-row hidden" id="logDeductRow">
+        <!-- Quick Search & 1-Tap Pantry Add -->
+        <div class="field">
+          <span>Toca productos de tu despensa para sumarlos a esta comida</span>
+          <input type="search" id="logPantrySearch" placeholder="Buscar pollo, huevo, arroz, avena..." autocomplete="off" />
+        </div>
+        <div class="pantry-picker-chips" id="logPantryChips"></div>
+
+        <!-- Live Meal Tray -->
+        <div class="tray-box">
+          <div class="tray-head">
+            <strong id="trayTitle">En esta comida (0 alimentos)</strong>
+            <span class="muted small-note num" id="trayTotals">0 kcal · 0g PRO</span>
+          </div>
+          <div id="logTrayList" class="tray-list"></div>
+        </div>
+
+        <!-- Manual Add Collapsible -->
+        <details class="nutrition-details" id="manualAddDetails">
+          <summary>+ Agregar alimento manual (fuera de despensa)</summary>
+          <div class="form-grid nutrition-grid">
+            <label class="field span-2">
+              <span>Nombre del alimento</span>
+              <input type="text" id="logManualName" maxlength="60" placeholder="Ej. Tortilla de maíz, tacos..." />
+            </label>
+            <label class="field">
+              <span>Kcal</span>
+              <input type="number" id="logManualKcal" step="any" min="0" placeholder="0" />
+            </label>
+            <label class="field">
+              <span>Proteína (g)</span>
+              <input type="number" id="logManualProtein" step="any" min="0" placeholder="0" />
+            </label>
+            <label class="field">
+              <span>Tipo proteína</span>
+              <select id="logManualProtType">
+                <option value="animal">Animal</option>
+                <option value="vegetal">Vegetal</option>
+                <option value="suplemento">Suplemento</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Carbos (g)</span>
+              <input type="number" id="logManualCarbs" step="any" min="0" placeholder="0" />
+            </label>
+            <label class="field">
+              <span>Tipo carbos</span>
+              <select id="logManualCarbType">
+                <option value="complejo">Complejos</option>
+                <option value="simple">Simples</option>
+                <option value="fibroso">Fibrosos</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Fibra (g)</span>
+              <input type="number" id="logManualFiber" step="any" min="0" placeholder="0" />
+            </label>
+            <label class="field">
+              <span>Grasas (g)</span>
+              <input type="number" id="logManualFat" step="any" min="0" placeholder="0" />
+            </label>
+            <label class="field">
+              <span>Grasa sat. (g)</span>
+              <input type="number" id="logManualSatFat" step="any" min="0" placeholder="0" />
+            </label>
+          </div>
+          <div style="margin-top:10px; display:flex; justify-content:flex-end;">
+            <button type="button" class="btn btn-ghost btn-sm" id="addManualToTrayBtn">+ Sumar al plato</button>
+          </div>
+        </details>
+
+        <label class="checkbox-row">
           <input type="checkbox" id="logDeduct" checked />
-          <span id="logDeductLabel">Descontar automáticamente de la despensa</span>
+          <span>Descontar de la despensa los productos incluidos</span>
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" id="logSaveAsRecipe" />
+          <span>Guardar también esta combinación en Mis Recetas</span>
         </label>
 
         <div class="modal-footer">
           <div class="spacer"></div>
           <button type="button" class="btn btn-ghost" data-close-modal="logModal">Cancelar</button>
-          <button type="submit" class="btn btn-primary">Guardar registro</button>
+          <button type="submit" class="btn btn-primary" id="saveMealTrayBtn">Guardar comida</button>
         </div>
       </form>
     </div>
@@ -681,6 +765,6 @@
   <!-- Toast Container -->
   <div class="toast-container" id="toastContainer" aria-live="polite"></div>
 
-  <script type="module" src="app.js?v=10"></script>
+  <script type="module" src="app.js?v=11"></script>
 </body>
 </html>

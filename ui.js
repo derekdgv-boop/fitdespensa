@@ -17,10 +17,11 @@ import {
   coverageDays,
   hasNutrition,
   logTotals,
+  macroSubtypeBreakdown,
   pantryTotals,
   todayStr,
   waterGoalMl,
-} from './nutrition.js?v=10';
+} from './nutrition.js?v=11';
 
 export const SUPPLEMENTS = [
   { id: 'creatina', label: 'Creatina 5g', match: 'creatina' },
@@ -459,7 +460,71 @@ export function renderDiarySummary(entries, profile, { waterMl = 0, streak = 0, 
   const trainingDay = Boolean(dayMeta?.trainingDay);
   const doneSupps = new Set(dayMeta?.supplements || []);
   const totals = logTotals(entries);
+  const sub = macroSubtypeBreakdown(entries);
   const targets = calcTargets(profile, { trainingDay });
+
+  const segBar = (segments) => {
+    const sum = segments.reduce((a, s) => a + s.val, 0);
+    if (!sum) return `<div class="seg-track"></div>`;
+    return `<div class="seg-track">${segments
+      .filter((s) => s.val > 0)
+      .map((s) => `<div class="seg-part" style="width:${(s.val / sum) * 100}%; background:${s.color}" title="${s.label}: ${s.val}g"></div>`)
+      .join('')}</div>`;
+  };
+
+  const breakdownCard = `
+    <div class="card subtype-card">
+      <div class="card-head" style="margin-bottom:10px;">
+        <div>
+          <h3 class="card-title">Desglose por tipo de macros</h3>
+          <span class="muted small-note">Calidad de tus proteínas, carbohidratos y grasas hoy</span>
+        </div>
+        ${sub.sodium > 0 ? `<span class="macro-tag">Sodio ${sub.sodium} mg</span>` : ''}
+      </div>
+      <div class="subtype-grid">
+        <div class="subtype-col">
+          <div class="subtype-head"><strong>Proteína</strong><span class="num">${Math.round(totals.protein)}g</span></div>
+          ${segBar([
+            { label: 'Animal', val: sub.protein.animal, color: 'var(--primary)' },
+            { label: 'Vegetal', val: sub.protein.vegetal, color: '#34d399' },
+            { label: 'Suplemento', val: sub.protein.suplemento, color: '#a78bfa' },
+          ])}
+          <div class="subtype-legend num">
+            <span><i style="background:var(--primary)"></i>Animal ${sub.protein.animal}g</span>
+            <span><i style="background:#34d399"></i>Vegetal ${sub.protein.vegetal}g</span>
+            <span><i style="background:#a78bfa"></i>Supl. ${sub.protein.suplemento}g</span>
+          </div>
+        </div>
+
+        <div class="subtype-col">
+          <div class="subtype-head"><strong>Carbohidratos</strong><span class="num">${Math.round(totals.carbs)}g</span></div>
+          ${segBar([
+            { label: 'Complejos', val: sub.carbs.complejo, color: 'var(--blue)' },
+            { label: 'Fibrosos', val: sub.carbs.fibroso, color: '#22c55e' },
+            { label: 'Simples', val: sub.carbs.simple, color: 'var(--accent)' },
+          ])}
+          <div class="subtype-legend num">
+            <span><i style="background:var(--blue)"></i>Complejos ${sub.carbs.complejo}g</span>
+            <span><i style="background:#22c55e"></i>Fibrosos ${sub.carbs.fibroso}g</span>
+            <span><i style="background:var(--accent)"></i>Simples ${sub.carbs.simple}g</span>
+          </div>
+          <div class="muted small-note num">Fibra: <strong>${sub.carbs.fiber}g</strong> / 30g · Azúcares: <strong>${sub.carbs.sugar}g</strong></div>
+        </div>
+
+        <div class="subtype-col">
+          <div class="subtype-head"><strong>Grasas</strong><span class="num">${Math.round(totals.fat)}g</span></div>
+          ${segBar([
+            { label: 'Saludables', val: sub.fat.unsat, color: '#facc15' },
+            { label: 'Saturadas', val: sub.fat.sat, color: 'var(--danger)' },
+          ])}
+          <div class="subtype-legend num">
+            <span><i style="background:#facc15"></i>Saludables ${sub.fat.unsat}g</span>
+            <span><i style="background:var(--danger)"></i>Saturadas ${sub.fat.sat}g</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
 
   // Cal AI / MacroFactor Hero Calorie Ring
   const kcalTarget = targets?.kcal || 0;
@@ -550,6 +615,8 @@ export function renderDiarySummary(entries, profile, { waterMl = 0, streak = 0, 
         ${macroRow('fat', 'fat')}
       </div>
     </div>
+
+    ${breakdownCard}
 
     <div class="water-card card">
       <div class="water-head">

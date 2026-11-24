@@ -79,17 +79,73 @@ export function coverageDays(totals, targets) {
 }
 
 export function logTotals(entries) {
-  const t = { kcal: 0, protein: 0, carbs: 0, fat: 0 };
-  entries.forEach((e) => MACROS.forEach((m) => { t[m] += Number(e[m]) || 0; }));
-  MACROS.forEach((m) => { t[m] = round(t[m], 1); });
+  const t = { kcal: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, sugar: 0, satFat: 0, unsatFat: 0, sodium: 0 };
+  entries.forEach((e) => {
+    Object.keys(t).forEach((k) => { t[k] += Number(e[k]) || 0; });
+  });
+  Object.keys(t).forEach((k) => { t[k] = round(t[k], 1); });
   return t;
 }
 
-/** Eating `servings` of an item: macros eaten and inventory units used. */
+/** Detailed breakdown of macro subtypes consumed from daily log entries. */
+export function macroSubtypeBreakdown(entries) {
+  const b = {
+    protein: { animal: 0, vegetal: 0, suplemento: 0 },
+    carbs: { complejo: 0, simple: 0, fibroso: 0, fiber: 0, sugar: 0 },
+    fat: { unsat: 0, sat: 0 },
+    sodium: 0,
+  };
+  for (const e of entries) {
+    const p = Number(e.protein) || 0;
+    const pt = ['animal', 'vegetal', 'suplemento'].includes(e.proteinType) ? e.proteinType : 'animal';
+    b.protein[pt] += p;
+
+    const c = Number(e.carbs) || 0;
+    const ct = ['complejo', 'simple', 'fibroso'].includes(e.carbType) ? e.carbType : 'complejo';
+    b.carbs[ct] += c;
+    b.carbs.fiber += Number(e.fiber) || 0;
+    b.carbs.sugar += Number(e.sugar) || 0;
+
+    const f = Number(e.fat) || 0;
+    const sat = Number(e.satFat) || 0;
+    const unsat = e.unsatFat != null && e.unsatFat !== '' ? Number(e.unsatFat) || 0 : Math.max(0, f - sat);
+    b.fat.sat += sat;
+    b.fat.unsat += unsat;
+
+    b.sodium += Number(e.sodium) || 0;
+  }
+  b.protein.animal = round(b.protein.animal, 1);
+  b.protein.vegetal = round(b.protein.vegetal, 1);
+  b.protein.suplemento = round(b.protein.suplemento, 1);
+  b.carbs.complejo = round(b.carbs.complejo, 1);
+  b.carbs.simple = round(b.carbs.simple, 1);
+  b.carbs.fibroso = round(b.carbs.fibroso, 1);
+  b.carbs.fiber = round(b.carbs.fiber, 1);
+  b.carbs.sugar = round(b.carbs.sugar, 1);
+  b.fat.sat = round(b.fat.sat, 1);
+  b.fat.unsat = round(b.fat.unsat, 1);
+  b.sodium = Math.round(b.sodium);
+  return b;
+}
+
+/** Eating `servings` of an item: macros + subtypes eaten and inventory units used. */
 export function consumeFromItem(item, servings) {
   const perUnit = Number(item.servingsPerUnit) > 0 ? Number(item.servingsPerUnit) : 1;
   const unitsUsed = round(servings / perUnit, 4);
-  const macros = Object.fromEntries(MACROS.map((m) => [m, round(servings * (Number(item[m]) || 0), 1)]));
+  const scale = (k) => round(servings * (Number(item[k]) || 0), 1);
+  const macros = {
+    kcal: scale('kcal'),
+    protein: scale('protein'),
+    proteinType: item.proteinType || 'animal',
+    carbs: scale('carbs'),
+    carbType: item.carbType || 'complejo',
+    fiber: scale('fiber'),
+    sugar: scale('sugar'),
+    fat: scale('fat'),
+    satFat: scale('satFat'),
+    unsatFat: item.unsatFat != null ? scale('unsatFat') : Math.max(0, round(scale('fat') - scale('satFat'), 1)),
+    sodium: Math.round(servings * (Number(item.sodium) || 0)),
+  };
   return { unitsUsed, newQty: Math.max(0, round(item.qty - unitsUsed, 4)), macros };
 }
 
@@ -130,10 +186,18 @@ export async function lookupBarcode(barcode) {
   const p = data.product;
   const n = p.nutriments || {};
   const hasServ = n['energy-kcal_serving'] != null || n.proteins_serving != null;
-  const kcal = hasServ ? n['energy-kcal_serving'] : n['energy-kcal_100g'];
-  const protein = hasServ ? n.proteins_serving : n.proteins_100g;
-  const carbs = hasServ ? n.carbohydrates_serving : n.carbohydrates_100g;
-  const fat = hasServ ? n.fat_serving : n.fat_100g;
+  const pick = (k) => (hasServ ? n[`${k}_serving`] : n[`${k}_100g`]);
+  const kcal = pick('energy-kcal');
+  const protein = pick('proteins');
+  const carbs = pick('carbohydrates');
+  const fiber = pick('fiber');
+  const sugar = pick('sugars');
+  const fat = pick('fat');
+  const satFat = pick('saturated-fat');
+  const sodiumG = pick('sodium');
+
+  const fatNum = fat != null ? round(Number(fat), 1) : null;
+  const satNum = satFat != null ? round(Number(satFat), 1) : null;
 
   return {
     name: p.product_name_es || p.product_name || p.brands || `Producto ${clean}`,
@@ -141,6 +205,11 @@ export async function lookupBarcode(barcode) {
     kcal: kcal != null ? Math.round(Number(kcal)) : null,
     protein: protein != null ? round(Number(protein), 1) : null,
     carbs: carbs != null ? round(Number(carbs), 1) : null,
-    fat: fat != null ? round(Number(fat), 1) : null,
+    fiber: fiber != null ? round(Number(fiber), 1) : null,
+    sugar: sugar != null ? round(Number(sugar), 1) : null,
+    fat: fatNum,
+    satFat: satNum,
+    unsatFat: fatNum != null && satNum != null ? Math.max(0, round(fatNum - satNum, 1)) : null,
+    sodium: sodiumG != null ? Math.round(Number(sodiumG) * 1000) : null,
   };
 }
