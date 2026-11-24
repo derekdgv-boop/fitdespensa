@@ -68,17 +68,33 @@ export function setGeminiConfig({ apiKey, model }) {
 
 export const hasGeminiKey = () => Boolean(getGeminiConfig().apiKey);
 
+const FALLBACK_CHAIN = [
+  'gemini-3.8-flash-lite',
+  'gemini-3.8-flash',
+  'gemini-3.8-pro',
+];
+
 let cachedModelsList = null;
 
 export async function listGeminiModels() {
   const { apiKey } = getGeminiConfig();
   if (!apiKey) throw new Error('Primero pega tu API key de Gemini.');
-  const res = await fetch(`${API_BASE}?pageSize=1000&key=${encodeURIComponent(apiKey)}`);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(data?.error?.message || `Error ${res.status} al validar tu clave en Google`);
+
+  const allModels = [];
+  let pageToken = '';
+  for (let page = 0; page < 5; page++) {
+    const tokenParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
+    const res = await fetch(`${API_BASE}?pageSize=100${tokenParam}&key=${encodeURIComponent(apiKey)}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.error?.message || `Error ${res.status} al validar tu clave en Google`);
+    }
+    if (Array.isArray(data.models)) allModels.push(...data.models);
+    if (!data.nextPageToken) break;
+    pageToken = data.nextPageToken;
   }
-  const list = (data.models || [])
+
+  const list = allModels
     .filter((m) => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
     .map((m) => String(m.name || '').replace(/^models\//, ''))
     .filter((name) => name.includes('gemini') && !isDeprecatedModel(name));
@@ -143,43 +159,51 @@ async function callGemini(body) {
     }
   }
 
-  // 2) If model is experiencing temporary high demand (503 / 429), retry with backoff + failover to backup models!
+  // 2) If model is experiencing temporary high demand (503 / 429), immediately fail over to gemini-3.8-flash-lite & active models!
   if (!attempt.ok && isOverloadedError(attempt.status, attempt.data?.error?.message)) {
-    await sleep(900);
-    attempt = await rawGenerate(apiKey, getGeminiConfig().model, body);
-
-    if (!attempt.ok && isOverloadedError(attempt.status, attempt.data?.error?.message)) {
-      try {
-        const available = cachedModelsList || (await listGeminiModels());
-        // Rank lightweight/flash variants first, excluding image/tts/embedding-only models
-        const candidates = available
-          .filter(
-            (m) =>
-              m !== model &&
-              !m.includes('tts') &&
-              !m.includes('image') &&
-              !m.includes('vision') &&
-              !m.includes('computer-use')
-          )
-          .sort((a, b) => {
-            const score = (x) => (x.includes('flash-lite') ? 0 : x.includes('flash') ? 1 : x.includes('pro') ? 2 : 3);
-            return score(a) - score(b);
-          })
-          .slice(0, 4);
-
-        for (const backupModel of candidates) {
-          const backupAttempt = await rawGenerate(apiKey, backupModel, body);
-          if (backupAttempt.ok) {
-            return backupAttempt.data;
-          }
-        }
-      } catch {
-        // Keep original error if listing backup models fails
+    // First try known fast/available models directly without waiting
+    const directBackups = FALLBACK_CHAIN.filter((m) => m !== model);
+    for (const backupModel of directBackups) {
+      const backupAttempt = await rawGenerate(apiKey, backupModel, body);
+      if (backupAttempt.ok) {
+        setGeminiConfig({ model: backupModel });
+        return backupAttempt.data;
       }
-      // One final retry after 1.5s on primary model
-      await sleep(1500);
-      attempt = await rawGenerate(apiKey, getGeminiConfig().model, body);
     }
+
+    // Next discover all active text/multimodal models on the account and try them
+    try {
+      const available = cachedModelsList || (await listGeminiModels());
+      const candidates = available
+        .filter(
+          (m) =>
+            m !== model &&
+            !directBackups.includes(m) &&
+            !m.includes('tts') &&
+            !m.includes('image') &&
+            !m.includes('embedding') &&
+            !m.includes('computer-use')
+        )
+        .sort((a, b) => {
+          const score = (x) => (x.includes('flash-lite') ? 0 : x.includes('flash') ? 1 : x.includes('pro') ? 2 : 3);
+          return score(a) - score(b);
+        })
+        .slice(0, 5);
+
+      for (const backupModel of candidates) {
+        const backupAttempt = await rawGenerate(apiKey, backupModel, body);
+        if (backupAttempt.ok) {
+          setGeminiConfig({ model: backupModel });
+          return backupAttempt.data;
+        }
+      }
+    } catch {
+      // Ignore listing error
+    }
+
+    // Final backoff retry
+    await sleep(1200);
+    attempt = await rawGenerate(apiKey, getGeminiConfig().model, body);
   }
 
   // 3) If model wasn't found (404 / deprecated), discover best active Flash model and retry
