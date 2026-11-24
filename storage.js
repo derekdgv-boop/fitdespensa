@@ -91,6 +91,7 @@ async function createLocalStore() {
   const logListeners = new Map(); // date -> Set(cb)
   const profileListeners = new Set();
   const recipeListeners = new Set();
+  const waterListeners = new Map(); // date -> Set(cb)
 
   // Migrate legacy localStorage data if present
   const existingItems = await idbTx(db, 'items', 'readonly', (s) => s.getAll());
@@ -141,6 +142,14 @@ async function createLocalStore() {
     const raw = await idbTx(db, 'recipes', 'readonly', (s) => s.getAll());
     const recipes = raw.map(normalizeRecipe).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
     recipeListeners.forEach((cb) => cb(recipes));
+  };
+
+  const emitWater = async (date) => {
+    const cbs = waterListeners.get(date);
+    if (!cbs || !cbs.size) return;
+    const rec = await idbTx(db, 'meta', 'readonly', (s) => s.get(`water_${date}`));
+    const ml = Number(rec?.value) || 0;
+    cbs.forEach((cb) => cb(ml));
   };
 
   const getLogsByDate = (date) =>
@@ -241,6 +250,28 @@ async function createLocalStore() {
     async deleteRecipe(id) {
       await idbTx(db, 'recipes', 'readwrite', (s) => s.delete(id));
       await emitRecipes();
+    },
+    subscribeWater(date, cb) {
+      if (!waterListeners.has(date)) waterListeners.set(date, new Set());
+      waterListeners.get(date).add(cb);
+      emitWater(date);
+      return () => {
+        const set = waterListeners.get(date);
+        if (set) {
+          set.delete(cb);
+          if (!set.size) waterListeners.delete(date);
+        }
+      };
+    },
+    async setWater(date, ml) {
+      const clean = Math.max(0, Math.min(10000, Math.round(Number(ml) || 0)));
+      await idbTx(db, 'meta', 'readwrite', (s) => s.put({ key: `water_${date}`, value: clean }));
+      await emitWater(date);
+      return clean;
+    },
+    async getLoggedDates() {
+      const all = await idbTx(db, 'logs', 'readonly', (s) => s.getAll());
+      return [...new Set((all || []).map((e) => e.date).filter(Boolean))];
     },
   };
 }
@@ -348,6 +379,22 @@ async function createFirestoreStore(householdCode) {
     },
     async deleteRecipe(id) {
       await fsMod.deleteDoc(fsMod.doc(recipesCol(), id));
+    },
+    subscribeWater(date, cb) {
+      const docRef = fsMod.doc(db, 'households', householdCode, 'meta', `water_${date}`);
+      return fsMod.onSnapshot(docRef, (snap) => {
+        cb(snap.exists() ? Number(snap.data()?.ml) || 0 : 0);
+      });
+    },
+    async setWater(date, ml) {
+      const clean = Math.max(0, Math.min(10000, Math.round(Number(ml) || 0)));
+      const docRef = fsMod.doc(db, 'households', householdCode, 'meta', `water_${date}`);
+      await fsMod.setDoc(docRef, { ml: clean, updatedAt: Date.now() });
+      return clean;
+    },
+    async getLoggedDates() {
+      const snap = await fsMod.getDocs(logsCol());
+      return [...new Set(snap.docs.map((d) => d.data()?.date).filter(Boolean))];
     },
   };
 }

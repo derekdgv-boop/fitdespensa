@@ -44,15 +44,15 @@ const SVG_STAR = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" st
 // =========================================================================
 // 0) LIVE TELEMETRY STRIP (Top of Coach IA)
 // =========================================================================
-export function renderLiveStrip({ items, profile, todayLogs }) {
+export function renderLiveStrip({ items, profile, todayLogs, waterMl = 0, streak = 0 }) {
   const targets = calcTargets(profile);
-  const totals = pantryTotals(items);
-  const cov = coverageDays(totals, targets);
   const eaten = logTotals(todayLogs);
   const lowCount = items.filter(inShoppingList).length;
 
   const protPct = targets?.protein > 0 ? Math.min(100, Math.round((eaten.protein / targets.protein) * 100)) : 0;
   const kcalPct = targets?.kcal > 0 ? Math.min(100, Math.round((eaten.kcal / targets.kcal) * 100)) : 0;
+  const waterGoal = 2500;
+  const waterPct = Math.min(100, Math.round((waterMl / waterGoal) * 100));
 
   return `
     <button type="button" class="live-pill" data-action="go-diary">
@@ -65,15 +65,15 @@ export function renderLiveStrip({ items, profile, todayLogs }) {
       <span class="live-pill-val" style="color:var(--accent)">${Math.round(eaten.kcal)}${targets ? ` / ${targets.kcal}` : ' kcal'}</span>
       <div class="progress-track"><div class="progress-fill kcal" style="width:${kcalPct}%"></div></div>
     </button>
-    <button type="button" class="live-pill" data-action="${targets ? 'go-catalog' : 'open-settings'}">
-      <span class="live-pill-label">Despensa</span>
-      <span class="live-pill-val">${cov?.protein != null ? `${cov.protein.toFixed(1)} días` : `${items.length} prod.`}</span>
-      <span class="live-pill-sub">${targets ? 'de proteína en casa' : 'Toca para poner meta'}</span>
+    <button type="button" class="live-pill" data-action="add-water-quick" title="Toca para sumar 250 ml">
+      <span class="live-pill-label">Agua (+250 ml)</span>
+      <span class="live-pill-val" style="color:var(--blue)">${(waterMl / 1000).toFixed(2)} / 2.5 L</span>
+      <div class="progress-track"><div class="progress-fill carbs" style="width:${waterPct}%"></div></div>
     </button>
     <button type="button" class="live-pill" data-action="go-shopping">
-      <span class="live-pill-label">Por comprar</span>
+      <span class="live-pill-label">${streak > 0 ? `Racha · ${streak}d 🔥` : 'Por comprar'}</span>
       <span class="live-pill-val" style="color:${lowCount ? 'var(--accent)' : 'var(--ok)'}">${lowCount}</span>
-      <span class="live-pill-sub">${lowCount ? 'artículos bajos' : 'todo surtido'}</span>
+      <span class="live-pill-sub">${lowCount ? 'faltan en despensa' : 'despensa surtida'}</span>
     </button>
   `;
 }
@@ -446,84 +446,145 @@ export function formatDateHeading(dateStr) {
   return { label, sub: dateStr };
 }
 
-export function renderDiarySummary(entries, profile) {
+export function renderDiarySummary(entries, profile, { waterMl = 0, streak = 0, recipes = [], items = [] } = {}) {
   const totals = logTotals(entries);
   const targets = calcTargets(profile);
 
-  const card = (key, cls) => {
-    const info = MACRO_INFO[key];
-    const val = totals[key];
-    const tgt = targets?.[key] || 0;
-    const pct = tgt > 0 ? Math.min(100, Math.round((val / tgt) * 100)) : 0;
-    const rem = tgt > 0 ? Math.max(0, Math.round(tgt - val)) : null;
+  // Cal AI / MacroFactor Hero Calorie Ring
+  const kcalTarget = targets?.kcal || 0;
+  const kcalRemaining = kcalTarget > 0 ? Math.max(0, Math.round(kcalTarget - totals.kcal)) : Math.round(totals.kcal);
+  const kcalOver = kcalTarget > 0 && totals.kcal > kcalTarget ? Math.round(totals.kcal - kcalTarget) : 0;
+  const r = 52;
+  const circ = 2 * Math.PI * r;
+  const pct = kcalTarget > 0 ? Math.min(1, totals.kcal / kcalTarget) : 0;
+  const offset = circ * (1 - pct);
 
+  const macroRow = (key, cls) => {
+    const info = MACRO_INFO[key];
+    const val = Math.round(totals[key]);
+    const tgt = targets?.[key] || 0;
+    const mpct = tgt > 0 ? Math.min(100, Math.round((val / tgt) * 100)) : 0;
+    const rem = tgt > 0 ? Math.max(0, Math.round(tgt - val)) : null;
     return `
-      <div class="macro-card">
-        <div class="macro-card-top">
-          <span>${info.label}</span>
-          <span>${rem != null ? `Faltan ${rem} ${info.unit}` : 'Sin meta'}</span>
+      <div class="hero-macro-row">
+        <div class="hero-macro-head">
+          <strong>${info.label}</strong>
+          <span class="num"><strong>${val}</strong>${tgt ? ` / ${tgt}g` : 'g'}${rem != null ? ` · <span class="muted">faltan ${rem}g</span>` : ''}</span>
         </div>
-        <div>
-          <span class="macro-val">${Math.round(val)}</span>
-          <span class="macro-tgt">${tgt ? ` / ${tgt} ${info.unit}` : ` ${info.unit}`}</span>
-        </div>
-        <div class="progress-track">
-          <div class="progress-fill ${cls}" style="width:${pct}%"></div>
-        </div>
+        <div class="progress-track"><div class="progress-fill ${cls}" style="width:${mpct}%"></div></div>
       </div>
     `;
   };
 
+  // Yazio-style Water Tracker (10 glasses x 250 ml = 2.5 L)
+  const glassesFilled = Math.min(10, Math.floor(waterMl / 250));
+  const glassesHtml = Array.from({ length: 10 }, (_, idx) => {
+    const filled = idx < glassesFilled;
+    const targetMl = (idx + 1) * 250;
+    return `<button type="button" class="water-drop ${filled ? 'filled' : ''}" data-action="set-water" data-ml="${targetMl}" title="${targetMl} ml" aria-label="${targetMl} ml">💧</button>`;
+  }).join('');
+
+  // Quick-log chips (saved recipes + top protein pantry items)
+  const quickChips = [
+    ...recipes.slice(0, 4).map(
+      (rec) => `<button type="button" class="quick-chip recipe" data-action="eat-recipe" data-id="${esc(rec.id)}">★ ${esc(rec.name)} · ${rec.protein}g P</button>`
+    ),
+    ...items
+      .filter((it) => it.qty > 0 && Number(it.protein) >= 5)
+      .sort((a, b) => Number(b.protein) - Number(a.protein))
+      .slice(0, 5)
+      .map(
+        (it) => `<button type="button" class="quick-chip" data-action="quick-eat-item" data-id="${esc(it.id)}">+ ${esc(it.name)} · ${it.protein}g P</button>`
+      ),
+  ].join('');
+
   return `
-    <div class="macro-grid">
-      ${card('kcal', 'kcal')}
-      ${card('protein', '')}
-      ${card('carbs', 'carbs')}
-      ${card('fat', 'fat')}
+    <div class="diary-hero card">
+      <div class="diary-hero-left">
+        <div class="cal-ring-wrap">
+          <svg class="cal-ring-svg" viewBox="0 0 124 124" aria-hidden="true">
+            <circle class="ring-track" cx="62" cy="62" r="${r}"></circle>
+            <circle class="ring-fill" cx="62" cy="62" r="${r}"
+              stroke="${kcalOver ? 'var(--danger)' : 'var(--primary)'}"
+              stroke-dasharray="${circ.toFixed(1)}"
+              stroke-dashoffset="${offset.toFixed(1)}"></circle>
+          </svg>
+          <div class="ring-center">
+            <span class="cal-ring-num num">${kcalOver ? `+${kcalOver}` : kcalRemaining}</span>
+            <span class="ring-unit">${kcalTarget ? (kcalOver ? 'kcal extra' : 'kcal restantes') : 'kcal hoy'}</span>
+          </div>
+        </div>
+        <div class="diary-hero-meta">
+          <span class="num">${Math.round(totals.kcal)} consumidas${kcalTarget ? ` · meta ${kcalTarget}` : ''}</span>
+          ${streak > 0 ? `<span class="streak-pill">🔥 Racha ${streak} ${streak === 1 ? 'día' : 'días'}</span>` : ''}
+        </div>
+      </div>
+
+      <div class="diary-hero-right">
+        ${macroRow('protein', '')}
+        ${macroRow('carbs', 'carbs')}
+        ${macroRow('fat', 'fat')}
+      </div>
     </div>
+
+    <div class="water-card card">
+      <div class="water-head">
+        <div>
+          <strong>💧 Hidratación</strong>
+          <span class="muted small-note num"> · ${(waterMl / 1000).toFixed(2)} / 2.50 L</span>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button type="button" class="btn btn-ghost btn-xs" data-action="step-water" data-dir="-250">−250 ml</button>
+          <button type="button" class="btn btn-primary btn-xs" data-action="step-water" data-dir="250">+250 ml</button>
+        </div>
+      </div>
+      <div class="water-drops">${glassesHtml}</div>
+    </div>
+
+    ${
+      quickChips
+        ? `
+          <div class="quick-log-wrap">
+            <span class="eyebrow">Registro rápido (1 toque)</span>
+            <div class="quick-log-strip">${quickChips}</div>
+          </div>
+        `
+        : ''
+    }
   `;
 }
 
 export function renderDiaryMeals(entries) {
-  if (!entries.length) {
-    return `
-      <div class="empty-state">
-        <h3>Sin comidas registradas este día</h3>
-        <p>Registra directamente desde tu despensa (descuenta existencias) o pídele al Coach IA que lo anote por ti.</p>
-        <button type="button" class="btn btn-primary btn-sm" data-action="open-log">Registrar comida</button>
-      </div>
-    `;
-  }
-
   return MEALS.map((meal) => {
     const list = entries.filter((e) => (e.meal || 'snack') === meal.id);
-    if (!list.length) return '';
     const sub = logTotals(list);
-    const rows = list
-      .map(
-        (e) => `
-          <div class="log-row">
-            <div>
-              <strong style="font-size:0.9rem;">${esc(e.name)}</strong>
-              <div class="muted small-note num">
-                ${round(e.servings, 2)} porc. · ${Math.round(e.kcal || 0)} kcal · P ${round(e.protein || 0, 1)}g · C ${round(e.carbs || 0, 1)}g · G ${round(e.fat || 0, 1)}g
+    const rows = list.length
+      ? list
+          .map(
+            (e) => `
+              <div class="log-row">
+                <div>
+                  <strong style="font-size:0.9rem;">${esc(e.name)}</strong>
+                  <div class="muted small-note num">
+                    ${round(e.servings, 2)} porc. · ${Math.round(e.kcal || 0)} kcal · P ${round(e.protein || 0, 1)}g · C ${round(e.carbs || 0, 1)}g · G ${round(e.fat || 0, 1)}g
+                  </div>
+                </div>
+                <div style="display:flex; gap:6px;">
+                  <button type="button" class="icon-btn icon-btn-sm" data-action="save-log-recipe" data-id="${esc(e.id)}" title="Guardar como receta">${SVG_STAR}</button>
+                  <button type="button" class="icon-btn icon-btn-sm" data-action="delete-log" data-id="${esc(e.id)}" title="Eliminar registro">${SVG_TRASH}</button>
+                </div>
               </div>
-            </div>
-            <div style="display:flex; gap:6px;">
-              <button type="button" class="icon-btn icon-btn-sm" data-action="save-log-recipe" data-id="${esc(e.id)}" title="Guardar como receta">${SVG_STAR}</button>
-              <button type="button" class="icon-btn icon-btn-sm" data-action="delete-log" data-id="${esc(e.id)}" title="Eliminar registro">${SVG_TRASH}</button>
-            </div>
-          </div>
-        `
-      )
-      .join('');
+            `
+          )
+          .join('')
+      : `<p class="muted small-note" style="padding:2px 0;">Sin alimentos registrados aquí todavía.</p>`;
 
     return `
       <div class="card meal-group">
-        <div class="card-head">
+        <div class="card-head" style="margin-bottom:${list.length ? '10px' : '4px'};">
           <div>
-            <h3 class="card-title">${meal.label}</h3>
-            <span class="muted small-note num">${Math.round(sub.kcal)} kcal · ${round(sub.protein, 1)}g proteína</span>
+            <h3 class="card-title">${meal.icon} ${meal.label}</h3>
+            <span class="muted small-note num">${list.length ? `${Math.round(sub.kcal)} kcal · ${round(sub.protein, 1)}g proteína` : '0 kcal'}</span>
           </div>
           <button type="button" class="btn btn-ghost btn-xs" data-action="open-log-meal" data-meal="${meal.id}">+ Agregar</button>
         </div>

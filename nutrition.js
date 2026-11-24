@@ -96,3 +96,43 @@ export function defaultMeal(date = new Date()) {
   const h = date.getHours();
   return h < 11 ? 'desayuno' : h < 16 ? 'comida' : h < 19 ? 'snack' : 'cena';
 }
+
+/** Consecutive days with at least one logged meal (counting up to today or yesterday). */
+export function calcStreak(loggedDates, today = todayStr()) {
+  const set = new Set(loggedDates || []);
+  let streak = 0;
+  let cursor = set.has(today) ? today : addDays(today, -1);
+  while (set.has(cursor)) {
+    streak++;
+    cursor = addDays(cursor, -1);
+  }
+  return streak;
+}
+
+/** Lookup product nutrition by barcode using Open Food Facts (free, no key needed). */
+export async function lookupBarcode(barcode) {
+  const clean = String(barcode || '').replace(/\D/g, '');
+  if (clean.length < 6) throw new Error('Ingresa un código de barras válido (al menos 6 dígitos).');
+  const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(clean)}.json`);
+  if (!res.ok) throw new Error('No se pudo consultar Open Food Facts.');
+  const data = await res.json();
+  if (data.status !== 1 || !data.product) {
+    throw new Error(`Producto no encontrado para el código ${clean}.`);
+  }
+  const p = data.product;
+  const n = p.nutriments || {};
+  const hasServ = n['energy-kcal_serving'] != null || n.proteins_serving != null;
+  const kcal = hasServ ? n['energy-kcal_serving'] : n['energy-kcal_100g'];
+  const protein = hasServ ? n.proteins_serving : n.proteins_100g;
+  const carbs = hasServ ? n.carbohydrates_serving : n.carbohydrates_100g;
+  const fat = hasServ ? n.fat_serving : n.fat_100g;
+
+  return {
+    name: p.product_name_es || p.product_name || p.brands || `Producto ${clean}`,
+    serving: p.serving_size || (hasServ ? '1 porción' : '100 g'),
+    kcal: kcal != null ? Math.round(Number(kcal)) : null,
+    protein: protein != null ? round(Number(protein), 1) : null,
+    carbs: carbs != null ? round(Number(carbs), 1) : null,
+    fat: fat != null ? round(Number(fat), 1) : null,
+  };
+}

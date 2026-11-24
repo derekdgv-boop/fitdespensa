@@ -14,15 +14,17 @@ import {
   ACTIVITY_LEVELS,
   GOALS,
   addDays,
+  calcStreak,
   calcTargets,
   consumeFromItem,
   coverageDays,
   defaultMeal,
   logTotals,
+  lookupBarcode,
   pantryTotals,
   todayStr,
-} from './nutrition.js';
-import { getHouseholdCode, initStorage, setHouseholdCode } from './storage.js?v=8';
+} from './nutrition.js?v=9';
+import { getHouseholdCode, initStorage, setHouseholdCode } from './storage.js?v=9';
 import { canUseWebcam, compressFile, dataUrlByteSize, isMobileDevice, startWebcam } from './camera.js?v=8';
 import {
   getGeminiConfig,
@@ -44,7 +46,7 @@ import {
   renderLiveStrip,
   renderRecipes,
   renderShoppingList,
-} from './ui.js?v=8';
+} from './ui.js?v=9';
 
 const SVG_SUN = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>`;
 const SVG_MOON = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>`;
@@ -72,7 +74,11 @@ const state = {
   diaryDate: todayStr(),
   diaryLogs: [],
   todayLogs: [],
+  waterMl: 0,
+  todayWaterMl: 0,
+  streak: 0,
   unsubDiary: null,
+  unsubWater: null,
   currentPhoto: null,
   currentRecipePhoto: null,
   pendingChatPhoto: null,
@@ -139,6 +145,8 @@ function renderAll() {
     items: state.items,
     profile: state.profile,
     todayLogs: state.todayLogs,
+    waterMl: state.todayWaterMl,
+    streak: state.streak,
   });
 
   $('categoryChips').innerHTML = renderCategoryChips(state.category, state.items);
@@ -155,7 +163,12 @@ function renderAll() {
   const heading = formatDateHeading(state.diaryDate);
   $('diaryDateLabel').textContent = heading.label;
   $('diaryDateSub').textContent = heading.sub;
-  $('diarySummary').innerHTML = renderDiarySummary(state.diaryLogs, state.profile);
+  $('diarySummary').innerHTML = renderDiarySummary(state.diaryLogs, state.profile, {
+    waterMl: state.waterMl,
+    streak: state.streak,
+    recipes: state.recipes,
+    items: state.items,
+  });
   $('diaryMeals').innerHTML = renderDiaryMeals(state.diaryLogs);
 
   $('recipesCountBadge').textContent = state.recipes.length ? `(${state.recipes.length})` : '';
@@ -285,9 +298,12 @@ function switchSettingsTab(stab) {
 function setDiaryDate(dateStr) {
   state.diaryDate = dateStr;
   if (state.unsubDiary) state.unsubDiary();
+  if (state.unsubWater) state.unsubWater();
   if (dateStr === todayStr()) {
     state.diaryLogs = state.todayLogs;
+    state.waterMl = state.todayWaterMl;
     state.unsubDiary = null;
+    state.unsubWater = null;
     renderAll();
     return;
   }
@@ -295,6 +311,21 @@ function setDiaryDate(dateStr) {
     state.diaryLogs = entries;
     renderAll();
   });
+  state.unsubWater = state.store.subscribeWater(dateStr, (ml) => {
+    state.waterMl = ml;
+    renderAll();
+  });
+}
+
+async function refreshStreak() {
+  if (!state.store?.getLoggedDates) return;
+  try {
+    const dates = await state.store.getLoggedDates();
+    state.streak = calcStreak(dates);
+    renderAll();
+  } catch {
+    // ignore
+  }
 }
 
 // =========================================================================
@@ -1080,6 +1111,31 @@ function bindEvents() {
     } else if (action === 'edit-recipe') {
       const rec = state.recipes.find((r) => r.id === id);
       if (rec) openRecipeModal(rec);
+    } else if (action === 'add-water-quick') {
+      await state.store.setWater(todayStr(), state.todayWaterMl + 250);
+      toast('+250 ml de agua');
+    } else if (action === 'step-water') {
+      await state.store.setWater(state.diaryDate, state.waterMl + Number(dir));
+    } else if (action === 'set-water') {
+      const targetMl = Number(btn.dataset.ml) || 0;
+      const next = targetMl === state.waterMl ? Math.max(0, targetMl - 250) : targetMl;
+      await state.store.setWater(state.diaryDate, next);
+    } else if (action === 'quick-eat-item') {
+      const it = state.items.find((x) => x.id === id);
+      if (!it) return;
+      const calc = consumeFromItem(it, 1);
+      await state.store.saveItem({ ...it, qty: calc.newQty });
+      await state.store.addLog({
+        date: state.diaryDate,
+        meal: defaultMeal(),
+        itemId: it.id,
+        name: it.name,
+        servings: 1,
+        ...calc.macros,
+        unitsUsed: calc.unitsUsed,
+      });
+      refreshStreak();
+      toast(`+1 porción de ${it.name} (${calc.macros.protein}g PRO)`);
     } else if (action === 'delete-recipe') {
       await state.store.deleteRecipe(id);
       toast('Receta eliminada');
@@ -1145,6 +1201,30 @@ function bindEvents() {
   });
   $('removePhotoBtn').addEventListener('click', () => setModalPhoto(null));
   $('scanPhotoBtn').addEventListener('click', scanCurrentPhoto);
+
+  $('barcodeLookupBtn').addEventListener('click', async () => {
+    const code = $('itemBarcode').value.trim();
+    if (!code) return toast('Escribe un código de barras');
+    const btn = $('barcodeLookupBtn');
+    btn.disabled = true;
+    btn.textContent = 'Buscando...';
+    try {
+      const p = await lookupBarcode(code);
+      if (p.name) $('itemName').value = p.name;
+      if (p.serving) $('itemServing').value = p.serving;
+      if (p.kcal != null) $('itemKcal').value = p.kcal;
+      if (p.protein != null) $('itemProtein').value = p.protein;
+      if (p.carbs != null) $('itemCarbs').value = p.carbs;
+      if (p.fat != null) $('itemFat').value = p.fat;
+      $('nutritionDetails').open = true;
+      toast(`Encontrado: ${p.name}`);
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Buscar';
+    }
+  });
 
   // Recipe photo & form
   $('recipePhotoBtn').addEventListener('click', () => $('recipePhotoInput').click());
@@ -1383,6 +1463,15 @@ async function boot() {
     state.todayLogs = entries;
     if (state.diaryDate === todayStr()) {
       state.diaryLogs = entries;
+    }
+    refreshStreak();
+    renderAll();
+  });
+
+  state.store.subscribeWater(todayStr(), (ml) => {
+    state.todayWaterMl = ml;
+    if (state.diaryDate === todayStr()) {
+      state.waterMl = ml;
     }
     renderAll();
   });
