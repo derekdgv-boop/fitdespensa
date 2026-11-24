@@ -23,9 +23,9 @@ import {
   lookupBarcode,
   pantryTotals,
   todayStr,
-} from './nutrition.js?v=9';
-import { getHouseholdCode, initStorage, setHouseholdCode } from './storage.js?v=9';
-import { canUseWebcam, compressFile, dataUrlByteSize, isMobileDevice, startWebcam } from './camera.js?v=8';
+} from './nutrition.js?v=10';
+import { getHouseholdCode, initStorage, setHouseholdCode } from './storage.js?v=10';
+import { canUseWebcam, compressFile, dataUrlByteSize, isMobileDevice, startBarcodeScanner, startWebcam } from './camera.js?v=10';
 import {
   getGeminiConfig,
   hasGeminiKey,
@@ -36,6 +36,7 @@ import {
   testGeminiConnection,
 } from './ai.js?v=8';
 import {
+  SUPPLEMENTS,
   esc,
   formatCoachText,
   formatDateHeading,
@@ -44,9 +45,10 @@ import {
   renderDiaryMeals,
   renderDiarySummary,
   renderLiveStrip,
+  renderProgress,
   renderRecipes,
   renderShoppingList,
-} from './ui.js?v=9';
+} from './ui.js?v=10';
 
 const SVG_SUN = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>`;
 const SVG_MOON = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>`;
@@ -74,11 +76,17 @@ const state = {
   diaryDate: todayStr(),
   diaryLogs: [],
   todayLogs: [],
+  allLogs: [],
+  weights: [],
   waterMl: 0,
   todayWaterMl: 0,
+  dayMeta: { trainingDay: false, supplements: [] },
+  todayDayMeta: { trainingDay: false, supplements: [] },
   streak: 0,
   unsubDiary: null,
   unsubWater: null,
+  unsubDayMeta: null,
+  barcodeScanner: null,
   currentPhoto: null,
   currentRecipePhoto: null,
   pendingChatPhoto: null,
@@ -147,6 +155,7 @@ function renderAll() {
     todayLogs: state.todayLogs,
     waterMl: state.todayWaterMl,
     streak: state.streak,
+    trainingDay: state.todayDayMeta.trainingDay,
   });
 
   $('categoryChips').innerHTML = renderCategoryChips(state.category, state.items);
@@ -168,11 +177,18 @@ function renderAll() {
     streak: state.streak,
     recipes: state.recipes,
     items: state.items,
+    dayMeta: state.dayMeta,
   });
   $('diaryMeals').innerHTML = renderDiaryMeals(state.diaryLogs);
 
   $('recipesCountBadge').textContent = state.recipes.length ? `(${state.recipes.length})` : '';
   $('recipesList').innerHTML = renderRecipes(state.recipes);
+
+  $('progressContent').innerHTML = renderProgress({
+    weights: state.weights,
+    allLogs: state.allLogs,
+    profile: state.profile,
+  });
 
   $('shoppingList').innerHTML = renderShoppingList(state.items);
 
@@ -285,6 +301,7 @@ function switchMealsSub(sub) {
   );
   $('subview-today').classList.toggle('hidden', sub !== 'today');
   $('subview-recipes').classList.toggle('hidden', sub !== 'recipes');
+  $('subview-progress').classList.toggle('hidden', sub !== 'progress');
 }
 
 function switchSettingsTab(stab) {
@@ -299,11 +316,14 @@ function setDiaryDate(dateStr) {
   state.diaryDate = dateStr;
   if (state.unsubDiary) state.unsubDiary();
   if (state.unsubWater) state.unsubWater();
+  if (state.unsubDayMeta) state.unsubDayMeta();
   if (dateStr === todayStr()) {
     state.diaryLogs = state.todayLogs;
     state.waterMl = state.todayWaterMl;
+    state.dayMeta = state.todayDayMeta;
     state.unsubDiary = null;
     state.unsubWater = null;
+    state.unsubDayMeta = null;
     renderAll();
     return;
   }
@@ -315,17 +335,41 @@ function setDiaryDate(dateStr) {
     state.waterMl = ml;
     renderAll();
   });
+  state.unsubDayMeta = state.store.subscribeDayMeta(dateStr, (meta) => {
+    state.dayMeta = meta;
+    renderAll();
+  });
 }
 
-async function refreshStreak() {
-  if (!state.store?.getLoggedDates) return;
+async function refreshAnalytics() {
+  if (!state.store?.getAllLogs) return;
   try {
-    const dates = await state.store.getLoggedDates();
-    state.streak = calcStreak(dates);
+    state.allLogs = await state.store.getAllLogs();
+    state.streak = calcStreak([...new Set(state.allLogs.map((e) => e.date).filter(Boolean))]);
     renderAll();
   } catch {
     // ignore
   }
+}
+
+/** Smart pantry deduction when eating a saved recipe: matches ingredient names to pantry items. */
+async function deductRecipeIngredients(recipe, servings = 1) {
+  const deducted = [];
+  if (!Array.isArray(recipe?.ingredients) || !recipe.ingredients.length) return deducted;
+  for (const rawIng of recipe.ingredients) {
+    const ingNorm = normText(rawIng);
+    if (!ingNorm) continue;
+    const match = state.items.find((it) => {
+      const n = normText(it.name);
+      return n.length >= 3 && (ingNorm.includes(n) || n.includes(ingNorm));
+    });
+    if (match && match.qty > 0) {
+      const calc = consumeFromItem(match, servings);
+      await state.store.saveItem({ ...match, qty: calc.newQty });
+      deducted.push(match.name);
+    }
+  }
+  return deducted;
 }
 
 // =========================================================================
@@ -497,6 +541,12 @@ function closeCameraModal() {
     state.webcam.stop();
     state.webcam = null;
   }
+  if (state.barcodeScanner) {
+    state.barcodeScanner.stop();
+    state.barcodeScanner = null;
+  }
+  $('capturePhotoBtn').classList.remove('hidden');
+  $('cameraModalTitle').textContent = 'Capturar foto';
   $('cameraModal').classList.add('hidden');
 }
 
@@ -999,7 +1049,30 @@ function bindEvents() {
     e.target.value = '';
   });
   $('removeChatPhotoBtn').addEventListener('click', () => setPendingChatPhoto(null));
+  $('sendPhotoAsMealBtn').addEventListener('click', () => {
+    const extra = $('chatInput').value.trim();
+    $('chatInput').value = '';
+    sendChatMessage(extra || 'Esta es la comida que acabo de comer: estima sus macros, regístrala en mi diario de hoy y pregúntame si quiero guardarla como receta.');
+  });
+  $('sendPhotoAsPantryBtn').addEventListener('click', () => {
+    const extra = $('chatInput').value.trim();
+    $('chatInput').value = '';
+    sendChatMessage(extra || 'Este es un producto que compré para mi despensa: agrégalo a mi inventario con sus macros y guarda su foto.');
+  });
   $('chatVoiceBtn').addEventListener('click', toggleVoiceInput);
+
+  // Weight form delegation inside Progreso
+  $('progressContent').addEventListener('submit', async (e) => {
+    if (e.target.id !== 'weightForm') return;
+    e.preventDefault();
+    const kg = Number($('weightInput')?.value);
+    try {
+      await state.store.saveWeight(todayStr(), kg);
+      toast(`Peso registrado: ${kg} kg`);
+    } catch (err) {
+      toast(err.message);
+    }
+  });
 
   $('searchInput').addEventListener('input', (e) => {
     state.search = e.target.value;
@@ -1095,7 +1168,7 @@ function bindEvents() {
       const rec = state.recipes.find((r) => r.id === id);
       if (!rec) return;
       await state.store.addLog({
-        date: todayStr(),
+        date: state.diaryDate,
         meal: rec.meal || defaultMeal(),
         itemId: null,
         recipeId: rec.id,
@@ -1107,10 +1180,37 @@ function bindEvents() {
         fat: rec.fat,
         unitsUsed: 0,
       });
-      toast(`"${rec.name}" registrada en tu diario de hoy`);
+      const deducted = await deductRecipeIngredients(rec, 1);
+      refreshAnalytics();
+      toast(
+        deducted.length
+          ? `"${rec.name}" registrada (descontado: ${deducted.join(', ')})`
+          : `"${rec.name}" registrada en tu diario`
+      );
     } else if (action === 'edit-recipe') {
       const rec = state.recipes.find((r) => r.id === id);
       if (rec) openRecipeModal(rec);
+    } else if (action === 'toggle-training') {
+      const next = { ...state.dayMeta, trainingDay: !state.dayMeta.trainingDay };
+      await state.store.saveDayMeta(state.diaryDate, next);
+      toast(next.trainingDay ? 'Día de entreno activado (+200 kcal · +500 ml agua)' : 'Cambiado a día de descanso');
+    } else if (action === 'toggle-supp') {
+      const suppId = btn.dataset.supp;
+      const supp = SUPPLEMENTS.find((s) => s.id === suppId);
+      const set = new Set(state.dayMeta.supplements || []);
+      const turningOn = !set.has(suppId);
+      if (turningOn) set.add(suppId);
+      else set.delete(suppId);
+      await state.store.saveDayMeta(state.diaryDate, { ...state.dayMeta, supplements: [...set] });
+      if (supp) {
+        const match = state.items.find((it) => normText(it.name).includes(supp.match));
+        if (match) {
+          const calc = consumeFromItem(match, 1);
+          const nextQty = turningOn ? calc.newQty : round(match.qty + calc.unitsUsed, 4);
+          await state.store.saveItem({ ...match, qty: nextQty });
+        }
+      }
+      toast(turningOn ? `${supp?.label || 'Suplemento'} marcado` : `${supp?.label || 'Suplemento'} desmarcado`);
     } else if (action === 'add-water-quick') {
       await state.store.setWater(todayStr(), state.todayWaterMl + 250);
       toast('+250 ml de agua');
@@ -1134,7 +1234,7 @@ function bindEvents() {
         ...calc.macros,
         unitsUsed: calc.unitsUsed,
       });
-      refreshStreak();
+      refreshAnalytics();
       toast(`+1 porción de ${it.name} (${calc.macros.protein}g PRO)`);
     } else if (action === 'delete-recipe') {
       await state.store.deleteRecipe(id);
@@ -1145,6 +1245,28 @@ function bindEvents() {
   $('prevDayBtn').addEventListener('click', () => setDiaryDate(addDays(state.diaryDate, -1)));
   $('nextDayBtn').addEventListener('click', () => setDiaryDate(addDays(state.diaryDate, 1)));
   $('addLogBtn').addEventListener('click', () => openLogModal());
+  $('copyYesterdayBtn').addEventListener('click', async () => {
+    const prevDate = addDays(state.diaryDate, -1);
+    const prevLogs = await state.store.getLogs(prevDate);
+    if (!prevLogs.length) return toast('No hay comidas registradas el día anterior');
+    for (const e of prevLogs) {
+      await state.store.addLog({
+        date: state.diaryDate,
+        meal: e.meal,
+        itemId: e.itemId || null,
+        recipeId: e.recipeId || null,
+        name: e.name,
+        servings: e.servings,
+        kcal: e.kcal,
+        protein: e.protein,
+        carbs: e.carbs,
+        fat: e.fat,
+        unitsUsed: 0,
+      });
+    }
+    refreshAnalytics();
+    toast(`Copiadas ${prevLogs.length} comidas del día anterior`);
+  });
 
   $('copyListBtn').addEventListener('click', async () => {
     const text = buildShoppingText();
@@ -1201,6 +1323,22 @@ function bindEvents() {
   });
   $('removePhotoBtn').addEventListener('click', () => setModalPhoto(null));
   $('scanPhotoBtn').addEventListener('click', scanCurrentPhoto);
+
+  $('scanBarcodeBtn').addEventListener('click', async () => {
+    try {
+      $('cameraModalTitle').textContent = 'Escanear código de barras';
+      $('capturePhotoBtn').classList.add('hidden');
+      $('cameraModal').classList.remove('hidden');
+      state.barcodeScanner = await startBarcodeScanner($('cameraVideo'), (code) => {
+        closeCameraModal();
+        $('itemBarcode').value = code;
+        $('barcodeLookupBtn').click();
+      });
+    } catch (err) {
+      closeCameraModal();
+      toast(err.message);
+    }
+  });
 
   $('barcodeLookupBtn').addEventListener('click', async () => {
     const code = $('itemBarcode').value.trim();
@@ -1464,7 +1602,7 @@ async function boot() {
     if (state.diaryDate === todayStr()) {
       state.diaryLogs = entries;
     }
-    refreshStreak();
+    refreshAnalytics();
     renderAll();
   });
 
@@ -1473,6 +1611,19 @@ async function boot() {
     if (state.diaryDate === todayStr()) {
       state.waterMl = ml;
     }
+    renderAll();
+  });
+
+  state.store.subscribeDayMeta(todayStr(), (meta) => {
+    state.todayDayMeta = meta;
+    if (state.diaryDate === todayStr()) {
+      state.dayMeta = meta;
+    }
+    renderAll();
+  });
+
+  state.store.subscribeWeights((weights) => {
+    state.weights = weights;
     renderAll();
   });
 }

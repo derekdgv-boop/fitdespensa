@@ -95,3 +95,49 @@ export function dataUrlByteSize(dataUrl) {
   const base64 = dataUrl.split(',')[1] || '';
   return Math.round((base64.length * 3) / 4);
 }
+
+
+export function supportsLiveBarcode() {
+  return typeof window !== 'undefined' && 'BarcodeDetector' in window && canUseWebcam();
+}
+
+/**
+ * Starts the rear camera and scans continuously for EAN/UPC barcodes.
+ * Calls `onDetect(rawValue)` on first match and returns `{ stop() }`.
+ */
+export async function startBarcodeScanner(videoEl, onDetect) {
+  if (!supportsLiveBarcode()) {
+    throw new Error('Tu navegador no soporta escáner en vivo (usa Chrome en Android o escribe el código manualmente).');
+  }
+  const detector = new window.BarcodeDetector({
+    formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'],
+  });
+  const cam = await startWebcam(videoEl);
+  let active = true;
+
+  const loop = async () => {
+    if (!active) return;
+    try {
+      if (videoEl.readyState >= 2) {
+        const codes = await detector.detect(videoEl);
+        if (codes?.length && codes[0].rawValue) {
+          active = false;
+          cam.stop();
+          onDetect(codes[0].rawValue);
+          return;
+        }
+      }
+    } catch {
+      // ignore frame errors
+    }
+    if (active) requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+
+  return {
+    stop() {
+      active = false;
+      cam.stop();
+    },
+  };
+}

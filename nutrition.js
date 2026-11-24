@@ -26,21 +26,29 @@ export const GOALS = [
 export const isProfileComplete = (p) =>
   Boolean(p) && p.weight > 0 && p.height > 0 && p.age > 0 && Boolean(p.sex) && Boolean(p.activity) && Boolean(p.goal);
 
-/** Daily targets: Mifflin-St Jeor BMR × activity × goal factor; custom values override. */
-export function calcTargets(p) {
+/** Daily targets: Mifflin-St Jeor BMR × activity × goal factor; trainingDay adds +200 kcal (+50g carbs). */
+export function calcTargets(p, { trainingDay = false } = {}) {
   if (!isProfileComplete(p)) return null;
   const act = ACTIVITY_LEVELS.find((a) => a.id === p.activity) || ACTIVITY_LEVELS[2];
   const goal = GOALS.find((g) => g.id === p.goal) || GOALS[1];
   const bmr = 10 * p.weight + 6.25 * p.height - 5 * p.age + (p.sex === 'h' ? 5 : -161);
   const tdee = bmr * act.factor;
-  const kcal = Math.round((tdee * goal.kcalFactor) / 10) * 10;
+  const bonusKcal = trainingDay ? 200 : 0;
+  const kcal = Math.round(((tdee * goal.kcalFactor) + bonusKcal) / 10) * 10;
   const protein = Math.round(p.weight * goal.proteinPerKg);
   const fat = Math.round(Math.max(p.weight * 0.8, (kcal * 0.25) / 9));
   const carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4));
   const auto = { kcal, protein, carbs, fat, bmr: Math.round(bmr), tdee: Math.round(tdee) };
   const c = p.custom || {};
-  const pick = (k) => (Number(c[k]) > 0 ? Number(c[k]) : auto[k]);
-  return { kcal: pick('kcal'), protein: pick('protein'), carbs: pick('carbs'), fat: pick('fat'), auto, goal };
+  const pick = (k) => (Number(c[k]) > 0 ? Number(c[k]) + (trainingDay && k === 'kcal' ? 200 : trainingDay && k === 'carbs' ? 50 : 0) : auto[k]);
+  return { kcal: pick('kcal'), protein: pick('protein'), carbs: pick('carbs'), fat: pick('fat'), auto, goal, trainingDay };
+}
+
+/** Dynamic hydration target based on body weight (35 ml/kg + 500 ml on training days), rounded to 250 ml. */
+export function waterGoalMl(profile, trainingDay = false) {
+  const weight = Number(profile?.weight) > 0 ? Number(profile.weight) : 70;
+  const raw = weight * 35 + (trainingDay ? 500 : 0);
+  return Math.max(2000, Math.min(5000, Math.round(raw / 250) * 250));
 }
 
 export const hasNutrition = (it) =>

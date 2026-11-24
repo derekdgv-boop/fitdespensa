@@ -92,6 +92,8 @@ async function createLocalStore() {
   const profileListeners = new Set();
   const recipeListeners = new Set();
   const waterListeners = new Map(); // date -> Set(cb)
+  const dayMetaListeners = new Map(); // date -> Set(cb)
+  const weightListeners = new Set();
 
   // Migrate legacy localStorage data if present
   const existingItems = await idbTx(db, 'items', 'readonly', (s) => s.getAll());
@@ -150,6 +152,24 @@ async function createLocalStore() {
     const rec = await idbTx(db, 'meta', 'readonly', (s) => s.get(`water_${date}`));
     const ml = Number(rec?.value) || 0;
     cbs.forEach((cb) => cb(ml));
+  };
+
+  const emitDayMeta = async (date) => {
+    const cbs = dayMetaListeners.get(date);
+    if (!cbs || !cbs.size) return;
+    const rec = await idbTx(db, 'meta', 'readonly', (s) => s.get(`daymeta_${date}`));
+    const val = rec?.value || { trainingDay: false, supplements: [] };
+    cbs.forEach((cb) => cb(val));
+  };
+
+  const emitWeights = async () => {
+    const all = await idbTx(db, 'meta', 'readonly', (s) => s.getAll());
+    const list = (all || [])
+      .filter((r) => String(r.key || '').startsWith('weight_'))
+      .map((r) => ({ date: r.key.slice(7), kg: Number(r.value) }))
+      .filter((r) => r.kg > 0)
+      .sort((a, b) => a.date.localeCompare(b.date));
+    weightListeners.forEach((cb) => cb(list));
   };
 
   const getLogsByDate = (date) =>
@@ -273,6 +293,42 @@ async function createLocalStore() {
       const all = await idbTx(db, 'logs', 'readonly', (s) => s.getAll());
       return [...new Set((all || []).map((e) => e.date).filter(Boolean))];
     },
+    async getAllLogs() {
+      return (await idbTx(db, 'logs', 'readonly', (s) => s.getAll())) || [];
+    },
+    subscribeDayMeta(date, cb) {
+      if (!dayMetaListeners.has(date)) dayMetaListeners.set(date, new Set());
+      dayMetaListeners.get(date).add(cb);
+      emitDayMeta(date);
+      return () => {
+        const set = dayMetaListeners.get(date);
+        if (set) {
+          set.delete(cb);
+          if (!set.size) dayMetaListeners.delete(date);
+        }
+      };
+    },
+    async saveDayMeta(date, data) {
+      const clean = {
+        trainingDay: Boolean(data?.trainingDay),
+        supplements: Array.isArray(data?.supplements) ? data.supplements : [],
+      };
+      await idbTx(db, 'meta', 'readwrite', (s) => s.put({ key: `daymeta_${date}`, value: clean }));
+      await emitDayMeta(date);
+      return clean;
+    },
+    subscribeWeights(cb) {
+      weightListeners.add(cb);
+      emitWeights();
+      return () => weightListeners.delete(cb);
+    },
+    async saveWeight(date, kg) {
+      const clean = Math.round(Number(kg) * 10) / 10;
+      if (!(clean > 20 && clean < 300)) throw new Error('Peso inválido');
+      await idbTx(db, 'meta', 'readwrite', (s) => s.put({ key: `weight_${date}`, value: clean }));
+      await emitWeights();
+      return { date, kg: clean };
+    },
   };
 }
 
@@ -395,6 +451,42 @@ async function createFirestoreStore(householdCode) {
     async getLoggedDates() {
       const snap = await fsMod.getDocs(logsCol());
       return [...new Set(snap.docs.map((d) => d.data()?.date).filter(Boolean))];
+    },
+    async getAllLogs() {
+      const snap = await fsMod.getDocs(logsCol());
+      return snap.docs.map((d) => ({ ...d.data(), id: d.id }));
+    },
+    subscribeDayMeta(date, cb) {
+      const docRef = fsMod.doc(db, 'households', householdCode, 'meta', `daymeta_${date}`);
+      return fsMod.onSnapshot(docRef, (snap) => {
+        cb(snap.exists() ? snap.data() : { trainingDay: false, supplements: [] });
+      });
+    },
+    async saveDayMeta(date, data) {
+      const clean = {
+        trainingDay: Boolean(data?.trainingDay),
+        supplements: Array.isArray(data?.supplements) ? data.supplements : [],
+      };
+      const docRef = fsMod.doc(db, 'households', householdCode, 'meta', `daymeta_${date}`);
+      await fsMod.setDoc(docRef, clean);
+      return clean;
+    },
+    subscribeWeights(cb) {
+      const col = fsMod.collection(db, 'households', householdCode, 'weights');
+      return fsMod.onSnapshot(col, (snap) => {
+        const list = snap.docs
+          .map((d) => ({ date: d.id, kg: Number(d.data()?.kg) }))
+          .filter((r) => r.kg > 0)
+          .sort((a, b) => a.date.localeCompare(b.date));
+        cb(list);
+      });
+    },
+    async saveWeight(date, kg) {
+      const clean = Math.round(Number(kg) * 10) / 10;
+      if (!(clean > 20 && clean < 300)) throw new Error('Peso inválido');
+      const docRef = fsMod.doc(db, 'households', householdCode, 'weights', date);
+      await fsMod.setDoc(docRef, { kg: clean, updatedAt: Date.now() });
+      return { date, kg: clean };
     },
   };
 }

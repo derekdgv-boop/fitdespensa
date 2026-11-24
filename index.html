@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23a3e635'/%3E%3Cpath d='M18 4 7 18h8l-1 10 11-14h-8l1-10z' fill='%230a1204'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="style.css?v=9" />
+  <link rel="stylesheet" href="style.css?v=10" />
 </head>
 <body>
   <div class="app-layout">
@@ -133,12 +133,15 @@
               <button type="button" class="prompt-pill" data-prompt="¿Qué me falta comprar para completar mi semana de proteína?">¿Qué compro?</button>
             </div>
 
-            <!-- Pending Photo Attachment Preview -->
+            <!-- Pending Photo Attachment Preview with 2 quick athlete modes -->
             <div class="chat-attach-bar hidden" id="chatAttachBar">
               <img id="chatAttachPreview" alt="Foto adjunta" />
-              <div class="flex-1">
-                <strong style="font-size:0.82rem;">Foto lista para enviar</strong>
-                <div class="muted" style="font-size:0.72rem;">Escribe qué es o envíala directa para que la IA la analice</div>
+              <div class="flex-1" style="min-width:0;">
+                <strong style="font-size:0.8rem; display:block;">¿Qué hacemos con esta foto?</strong>
+                <div style="display:flex; gap:6px; margin-top:5px; flex-wrap:wrap;">
+                  <button type="button" class="btn btn-primary btn-xs" id="sendPhotoAsMealBtn">🍽️ Subir comida</button>
+                  <button type="button" class="btn btn-ghost btn-xs" id="sendPhotoAsPantryBtn">📦 Subir a despensa</button>
+                </div>
               </div>
               <button type="button" class="icon-btn icon-btn-sm" id="removeChatPhotoBtn" aria-label="Quitar foto">✕</button>
             </div>
@@ -170,7 +173,8 @@
             <div class="page-actions">
               <div class="segmented" role="tablist" aria-label="Subsección de comidas">
                 <button type="button" class="seg-btn active" data-meals-sub="today">Diario</button>
-                <button type="button" class="seg-btn" data-meals-sub="recipes">Mis Recetas <span id="recipesCountBadge" class="muted"></span></button>
+                <button type="button" class="seg-btn" data-meals-sub="recipes">Recetas <span id="recipesCountBadge" class="muted"></span></button>
+                <button type="button" class="seg-btn" data-meals-sub="progress">Progreso</button>
               </div>
             </div>
           </div>
@@ -190,7 +194,10 @@
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m9 18 6-6-6-6"/></svg>
                 </button>
               </div>
-              <button type="button" class="btn btn-primary btn-sm" id="addLogBtn">+ Registrar comida</button>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button type="button" class="btn btn-ghost btn-sm" id="copyYesterdayBtn">Copiar ayer</button>
+                <button type="button" class="btn btn-primary btn-sm" id="addLogBtn">+ Registrar comida</button>
+              </div>
             </div>
             <div id="diarySummary"></div>
             <div id="diaryMeals"></div>
@@ -199,10 +206,15 @@
           <!-- Subvista B: Mis Recetas -->
           <div id="subview-recipes" class="hidden">
             <div class="subbar">
-              <p class="muted small-note">Toca <strong>Comí esto</strong> en cualquier receta para registrarla en tu diario de hoy.</p>
+              <p class="muted small-note">Toca <strong>Comí esto</strong> para registrar la receta y descontar ingredientes coincidentes de tu despensa.</p>
               <button type="button" class="btn btn-primary btn-sm" id="newRecipeBtn">+ Nueva receta</button>
             </div>
             <div id="recipesList" class="recipes-grid"></div>
+          </div>
+
+          <!-- Subvista C: Progreso (Peso + Tendencia + Adherencia 7d) -->
+          <div id="subview-progress" class="hidden">
+            <div id="progressContent"></div>
           </div>
         </section>
 
@@ -311,6 +323,7 @@
           <span>Código de barras (Open Food Facts · gratis)</span>
           <div class="barcode-bar">
             <input type="text" id="itemBarcode" inputmode="numeric" placeholder="Ej. 7501055300075" />
+            <button type="button" class="btn btn-ghost btn-sm" id="scanBarcodeBtn" title="Escanear con cámara">📷</button>
             <button type="button" class="btn btn-ghost btn-sm" id="barcodeLookupBtn">Buscar</button>
           </div>
         </div>
@@ -321,27 +334,32 @@
             <input type="text" id="itemName" required maxlength="60" placeholder="Ej. Pechuga de pollo, Proteína whey" />
           </label>
           <label class="field">
-            <span>Categoría</span>
-            <select id="itemCategory"></select>
+            <span>Cantidad actual *</span>
+            <input type="number" id="itemQty" step="any" min="0" required value="1" />
           </label>
           <label class="field">
             <span>Unidad</span>
             <select id="itemUnit"></select>
           </label>
-          <label class="field">
-            <span>Cantidad actual *</span>
-            <input type="number" id="itemQty" step="any" min="0" required value="1" />
-          </label>
-          <label class="field">
-            <span>Mínimo de alerta *</span>
-            <input type="number" id="itemMin" step="any" min="0" required value="1" />
-          </label>
         </div>
 
-        <label class="checkbox-row">
-          <input type="checkbox" id="itemNeedBuy" />
-          <span>Añadir directamente a la lista de compras</span>
-        </label>
+        <details class="nutrition-details" id="advancedItemDetails">
+          <summary>Categoría y alerta de reposición</summary>
+          <div class="form-grid nutrition-grid">
+            <label class="field">
+              <span>Categoría</span>
+              <select id="itemCategory"></select>
+            </label>
+            <label class="field">
+              <span>Mínimo de alerta</span>
+              <input type="number" id="itemMin" step="any" min="0" required value="1" />
+            </label>
+          </div>
+          <label class="checkbox-row" style="margin-top:10px;">
+            <input type="checkbox" id="itemNeedBuy" />
+            <span>Añadir directamente a la lista de compras</span>
+          </label>
+        </details>
 
         <details class="nutrition-details" id="nutritionDetails">
           <summary>Información nutrimental (opcional)</summary>
@@ -663,6 +681,6 @@
   <!-- Toast Container -->
   <div class="toast-container" id="toastContainer" aria-live="polite"></div>
 
-  <script type="module" src="app.js?v=9"></script>
+  <script type="module" src="app.js?v=10"></script>
 </body>
 </html>

@@ -12,13 +12,22 @@ import {
 } from './inventory.js';
 import {
   MACRO_INFO,
+  addDays,
   calcTargets,
   coverageDays,
   hasNutrition,
   logTotals,
   pantryTotals,
   todayStr,
-} from './nutrition.js';
+  waterGoalMl,
+} from './nutrition.js?v=10';
+
+export const SUPPLEMENTS = [
+  { id: 'creatina', label: 'Creatina 5g', match: 'creatina' },
+  { id: 'whey', label: 'Proteína whey', match: 'whey' },
+  { id: 'omega3', label: 'Omega-3', match: 'omega' },
+  { id: 'electrolitos', label: 'Electrolitos', match: 'electrolito' },
+];
 
 export const esc = (s) =>
   String(s ?? '')
@@ -44,15 +53,15 @@ const SVG_STAR = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" st
 // =========================================================================
 // 0) LIVE TELEMETRY STRIP (Top of Coach IA)
 // =========================================================================
-export function renderLiveStrip({ items, profile, todayLogs, waterMl = 0, streak = 0 }) {
-  const targets = calcTargets(profile);
+export function renderLiveStrip({ items, profile, todayLogs, waterMl = 0, streak = 0, trainingDay = false }) {
+  const targets = calcTargets(profile, { trainingDay });
   const eaten = logTotals(todayLogs);
   const lowCount = items.filter(inShoppingList).length;
 
   const protPct = targets?.protein > 0 ? Math.min(100, Math.round((eaten.protein / targets.protein) * 100)) : 0;
   const kcalPct = targets?.kcal > 0 ? Math.min(100, Math.round((eaten.kcal / targets.kcal) * 100)) : 0;
-  const waterGoal = 2500;
-  const waterPct = Math.min(100, Math.round((waterMl / waterGoal) * 100));
+  const wGoal = waterGoalMl(profile, trainingDay);
+  const waterPct = Math.min(100, Math.round((waterMl / wGoal) * 100));
 
   return `
     <button type="button" class="live-pill" data-action="go-diary">
@@ -61,13 +70,13 @@ export function renderLiveStrip({ items, profile, todayLogs, waterMl = 0, streak
       <div class="progress-track"><div class="progress-fill" style="width:${protPct}%"></div></div>
     </button>
     <button type="button" class="live-pill" data-action="go-diary">
-      <span class="live-pill-label">Calorías hoy</span>
+      <span class="live-pill-label">Calorías${trainingDay ? ' 💪' : ''}</span>
       <span class="live-pill-val" style="color:var(--accent)">${Math.round(eaten.kcal)}${targets ? ` / ${targets.kcal}` : ' kcal'}</span>
       <div class="progress-track"><div class="progress-fill kcal" style="width:${kcalPct}%"></div></div>
     </button>
     <button type="button" class="live-pill" data-action="add-water-quick" title="Toca para sumar 250 ml">
       <span class="live-pill-label">Agua (+250 ml)</span>
-      <span class="live-pill-val" style="color:var(--blue)">${(waterMl / 1000).toFixed(2)} / 2.5 L</span>
+      <span class="live-pill-val" style="color:var(--blue)">${(waterMl / 1000).toFixed(2)} / ${(wGoal / 1000).toFixed(2)} L</span>
       <div class="progress-track"><div class="progress-fill carbs" style="width:${waterPct}%"></div></div>
     </button>
     <button type="button" class="live-pill" data-action="go-shopping">
@@ -446,9 +455,11 @@ export function formatDateHeading(dateStr) {
   return { label, sub: dateStr };
 }
 
-export function renderDiarySummary(entries, profile, { waterMl = 0, streak = 0, recipes = [], items = [] } = {}) {
+export function renderDiarySummary(entries, profile, { waterMl = 0, streak = 0, recipes = [], items = [], dayMeta = {} } = {}) {
+  const trainingDay = Boolean(dayMeta?.trainingDay);
+  const doneSupps = new Set(dayMeta?.supplements || []);
   const totals = logTotals(entries);
-  const targets = calcTargets(profile);
+  const targets = calcTargets(profile, { trainingDay });
 
   // Cal AI / MacroFactor Hero Calorie Ring
   const kcalTarget = targets?.kcal || 0;
@@ -476,12 +487,20 @@ export function renderDiarySummary(entries, profile, { waterMl = 0, streak = 0, 
     `;
   };
 
-  // Yazio-style Water Tracker (10 glasses x 250 ml = 2.5 L)
-  const glassesFilled = Math.min(10, Math.floor(waterMl / 250));
-  const glassesHtml = Array.from({ length: 10 }, (_, idx) => {
+  // Dynamic Water Goal based on body weight + training day
+  const wGoal = waterGoalMl(profile, trainingDay);
+  const totalGlasses = Math.max(8, Math.min(16, Math.round(wGoal / 250)));
+  const glassesFilled = Math.min(totalGlasses, Math.floor(waterMl / 250));
+  const glassesHtml = Array.from({ length: totalGlasses }, (_, idx) => {
     const filled = idx < glassesFilled;
     const targetMl = (idx + 1) * 250;
     return `<button type="button" class="water-drop ${filled ? 'filled' : ''}" data-action="set-water" data-ml="${targetMl}" title="${targetMl} ml" aria-label="${targetMl} ml">💧</button>`;
+  }).join('');
+
+  // Daily Supplements Checklist
+  const suppHtml = SUPPLEMENTS.map((s) => {
+    const checked = doneSupps.has(s.id);
+    return `<button type="button" class="supp-pill ${checked ? 'done' : ''}" data-action="toggle-supp" data-supp="${s.id}">${checked ? '✓ ' : '+ '}${esc(s.label)}</button>`;
   }).join('');
 
   // Quick-log chips (saved recipes + top protein pantry items)
@@ -516,7 +535,12 @@ export function renderDiarySummary(entries, profile, { waterMl = 0, streak = 0, 
         </div>
         <div class="diary-hero-meta">
           <span class="num">${Math.round(totals.kcal)} consumidas${kcalTarget ? ` · meta ${kcalTarget}` : ''}</span>
-          ${streak > 0 ? `<span class="streak-pill">🔥 Racha ${streak} ${streak === 1 ? 'día' : 'días'}</span>` : ''}
+          <div style="display:flex; gap:6px; flex-wrap:wrap; justify-content:center;">
+            ${streak > 0 ? `<span class="streak-pill">🔥 ${streak}d</span>` : ''}
+            <button type="button" class="train-toggle ${trainingDay ? 'active' : ''}" data-action="toggle-training">
+              ${trainingDay ? '💪 Día de entreno (+200 kcal)' : '🛋️ Día de descanso'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -531,14 +555,18 @@ export function renderDiarySummary(entries, profile, { waterMl = 0, streak = 0, 
       <div class="water-head">
         <div>
           <strong>💧 Hidratación</strong>
-          <span class="muted small-note num"> · ${(waterMl / 1000).toFixed(2)} / 2.50 L</span>
+          <span class="muted small-note num"> · ${(waterMl / 1000).toFixed(2)} / ${(wGoal / 1000).toFixed(2)} L</span>
         </div>
         <div style="display:flex; gap:6px;">
           <button type="button" class="btn btn-ghost btn-xs" data-action="step-water" data-dir="-250">−250 ml</button>
           <button type="button" class="btn btn-primary btn-xs" data-action="step-water" data-dir="250">+250 ml</button>
         </div>
       </div>
-      <div class="water-drops">${glassesHtml}</div>
+      <div class="water-drops" style="grid-template-columns: repeat(${Math.min(totalGlasses, 10)}, 1fr);">${glassesHtml}</div>
+      <div class="supp-bar">
+        <span class="muted small-note" style="font-weight:600;">Suplementos:</span>
+        ${suppHtml}
+      </div>
     </div>
 
     ${
@@ -551,6 +579,101 @@ export function renderDiarySummary(entries, profile, { waterMl = 0, streak = 0, 
         `
         : ''
     }
+  `;
+}
+
+// =========================================================================
+// PROGRESO (Peso corporal + Tendencia 7d + Adherencia semanal)
+// =========================================================================
+export function renderProgress({ weights = [], allLogs = [], profile }) {
+  const targets = calcTargets(profile);
+  const last7Weights = weights.slice(-7);
+  const avg7 = last7Weights.length
+    ? (last7Weights.reduce((s, w) => s + w.kg, 0) / last7Weights.length).toFixed(1)
+    : null;
+  const latest = weights[weights.length - 1];
+  const prev = weights.length >= 2 ? weights[weights.length - 2] : null;
+  const delta = latest && prev ? (latest.kg - prev.kg).toFixed(1) : null;
+
+  // Weight SVG sparkline (last 14 entries)
+  const pts = weights.slice(-14);
+  let weightSvg = `<p class="muted small-note">Registra tu peso al menos 2 días para ver tu curva de tendencia.</p>`;
+  if (pts.length >= 2) {
+    const minW = Math.min(...pts.map((p) => p.kg)) - 0.5;
+    const maxW = Math.max(...pts.map((p) => p.kg)) + 0.5;
+    const range = Math.max(0.5, maxW - minW);
+    const W = 360;
+    const H = 110;
+    const coords = pts.map((p, i) => {
+      const x = 14 + (i / (pts.length - 1)) * (W - 28);
+      const y = H - 18 - ((p.kg - minW) / range) * (H - 34);
+      return { x, y, kg: p.kg, date: p.date };
+    });
+    const pathD = coords.map((c, i) => `${i === 0 ? 'M' : 'L'}${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
+    const circles = coords
+      .map((c) => `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="3.8" fill="var(--primary)"><title>${c.date}: ${c.kg} kg</title></circle>`)
+      .join('');
+    weightSvg = `
+      <svg class="trend-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+        <path d="${pathD}" fill="none" stroke="var(--primary)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" />
+        ${circles}
+      </svg>
+    `;
+  }
+
+  // Last 7 days adherence bars (protein vs target)
+  const today = todayStr();
+  const days = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6));
+  const barsHtml = days
+    .map((d) => {
+      const dayEntries = allLogs.filter((e) => e.date === d);
+      const t = logTotals(dayEntries);
+      const pTarget = targets?.protein || 120;
+      const pct = Math.min(100, Math.round((t.protein / pTarget) * 100));
+      const dt = new Date(d + 'T12:00:00');
+      const dow = dt.toLocaleDateString('es-MX', { weekday: 'short' }).slice(0, 3);
+      const cls = pct >= 85 ? 'good' : pct >= 40 ? 'mid' : 'low';
+      return `
+        <div class="adh-col" title="${d}: ${Math.round(t.protein)}g PRO · ${Math.round(t.kcal)} kcal">
+          <span class="adh-val num">${t.protein ? `${Math.round(t.protein)}g` : '—'}</span>
+          <div class="adh-track"><div class="adh-fill ${cls}" style="height:${Math.max(4, pct)}%"></div></div>
+          <span class="adh-day">${dow}</span>
+        </div>
+      `;
+    })
+    .join('');
+
+  return `
+    <div class="bento-bottom">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h3 class="card-title">Peso corporal y tendencia</h3>
+            <span class="muted small-note">${avg7 ? `Promedio 7 días: ${avg7} kg` : 'Registra tu peso de hoy'}</span>
+          </div>
+          ${
+            latest
+              ? `<span class="macro-tag prot">${latest.kg} kg${delta != null ? ` (${Number(delta) > 0 ? '+' : ''}${delta})` : ''}</span>`
+              : ''
+          }
+        </div>
+        <form id="weightForm" class="inline-row" style="margin-bottom:14px;">
+          <input type="number" id="weightInput" step="0.1" min="30" max="250" placeholder="Ej. 74.8 kg" value="${latest ? latest.kg : profile?.weight || ''}" style="padding:8px 11px; border-radius:10px; border:1px solid var(--border); background:var(--bg-2);" />
+          <button type="submit" class="btn btn-primary btn-sm">Guardar hoy</button>
+        </form>
+        ${weightSvg}
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h3 class="card-title">Adherencia de proteína (7 días)</h3>
+            <span class="muted small-note">${targets ? `Meta diaria: ${targets.protein} g proteína` : 'Configura tu perfil para tu meta exacta'}</span>
+          </div>
+        </div>
+        <div class="adh-chart">${barsHtml}</div>
+      </div>
+    </div>
   `;
 }
 
