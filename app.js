@@ -30,7 +30,7 @@ import {
   recognizeProduct,
   runCoachTurn,
   setGeminiConfig,
-} from './ai.js?v=19';
+} from './ai.js?v=20';
 import {
   esc,
   formatCoachText,

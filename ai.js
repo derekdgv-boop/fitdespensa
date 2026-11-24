@@ -1,8 +1,7 @@
-// ai.js — Bulletproof Gemini REST client for FitDespensa:
-// 1) Automatic full nutrition table recognition from product/label photos
-// 2) Structured AI Pantry & Shopping Recommendations (works even on empty pantry)
-// 3) Conversational & Multimodal Inventory Coach IA (photo + voice + text)
-// Includes automatic model discovery/fallback and resilient JSON parsing.
+// ai.js — Zero-Downtime AI Client for FitDespensa:
+// - Uses Gemini 3.8 / active Gemini models first
+// - Automatically adapts payloads (schema/systemInstruction) to Gemma-3 (27B/12B) when Gemini has 503 high demand
+// - Built-in smart algorithmic advisor fallback if all Google endpoints are temporarily saturated
 import { CATEGORY_NAMES, UNITS } from './constants.js?v=14';
 import { DEFAULT_GEMINI_MODEL } from './firebase-config.js?v=7';
 
@@ -25,11 +24,11 @@ function isDeprecatedModel(name) {
   return RETIRED_EXACT.has(m);
 }
 
-function isUsableTextModel(name) {
+function isUsableModel(name) {
   const m = String(name || '').toLowerCase().replace(/^models\//, '');
   if (isDeprecatedModel(m)) return false;
   if (!(m.startsWith('gemini-') || m.startsWith('gemma-3'))) return false;
-  const blocked = ['tts', 'image', 'embedding', 'aqa', 'vision', 'computer-use', 'robotics', 'audio', 'live', 'thinking-exp'];
+  const blocked = ['tts', 'image', 'embedding', 'aqa', 'vision', 'computer-use', 'robotics', 'audio', 'live', 'thinking-exp', '1b', '4b'];
   return !blocked.some((b) => m.includes(b));
 }
 
@@ -40,10 +39,10 @@ function rankModel(name) {
   if (m.includes('3.') && m.includes('flash-lite')) return 3;
   if (m.includes('3.') && m.includes('flash')) return 4;
   if (m.includes('2.5-flash-lite')) return 5;
-  if (m.includes('3.') && m.includes('pro')) return 6;
-  if (m.includes('2.5-pro')) return 7;
-  if (m.includes('flash')) return 8;
-  if (m.includes('pro')) return 9;
+  if (m.includes('gemma-3-27b')) return 6;
+  if (m.includes('gemma-3-12b')) return 7;
+  if (m.includes('3.') && m.includes('pro')) return 8;
+  if (m.includes('2.5-pro')) return 9;
   return 10;
 }
 
@@ -64,11 +63,10 @@ function safeSet(k, v) {
     if (v) localStorage.setItem(k, v);
     else localStorage.removeItem(k);
   } catch {
-    // Fallback in memory if browser blocks localStorage
+    // Fallback in memory
   }
 }
 
-/** Extracts a clean Gemini API key even if the user pasted a curl snippet, quotes, or spaces. */
 export function sanitizeApiKey(raw) {
   const str = String(raw || '').trim();
   const match = str.match(/AIza[A-Za-z0-9_-]{30,}/);
@@ -100,12 +98,6 @@ export function setGeminiConfig({ apiKey, model }) {
 
 export const hasGeminiKey = () => Boolean(getGeminiConfig().apiKey);
 
-const FALLBACK_CHAIN = [
-  'gemini-3.8-flash-lite',
-  'gemini-3.8-flash',
-  'gemini-3.8-pro',
-];
-
 let cachedModelsList = null;
 
 export async function listGeminiModels() {
@@ -129,13 +121,11 @@ export async function listGeminiModels() {
   const list = allModels
     .filter((m) => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
     .map((m) => String(m.name || '').replace(/^models\//, ''))
-    .filter(isUsableTextModel)
+    .filter(isUsableModel)
     .sort((a, b) => rankModel(a) - rankModel(b));
   if (list.length) cachedModelsList = list;
   return list;
 }
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function isOverloadedError(status, msg) {
   const m = String(msg || '').toLowerCase();
@@ -149,94 +139,94 @@ function isOverloadedError(status, msg) {
   );
 }
 
-function pickBestFlashModel(models, exclude = '') {
-  const pool = models.filter((m) => m !== exclude && !isDeprecatedModel(m));
-  return (
-    pool.find((m) => m === 'gemini-3.8-flash') ||
-    pool.find((m) => m.includes('3.8') && m.includes('flash')) ||
-    pool.find((m) => m.includes('3.') && m.includes('flash')) ||
-    pool.find((m) => m.includes('flash')) ||
-    pool[0] ||
-    DEFAULT_GEMINI_MODEL
-  );
+/**
+ * Adapts Gemini payloads so Gemma-3 models (which don't accept systemInstruction,
+ * responseSchema, or tools) can seamlessly serve requests during Gemini 503 spikes!
+ */
+function adaptBodyForModel(modelName, body) {
+  if (!String(modelName).toLowerCase().startsWith('gemma-')) {
+    return body;
+  }
+  const sysText = body.systemInstruction?.parts?.map((p) => p.text).join('\n') || '';
+  const schemaHint = body.generationConfig?.responseSchema
+    ? `\nIMPORTANTE: Responde ÚNICAMENTE con un objeto JSON válido (sin texto adicional ni bloques markdown) que cumpla esta estructura: ${JSON.stringify(body.generationConfig.responseSchema)}`
+    : '';
+
+  const clonedContents = (body.contents || [])
+    .filter((c) => !c.parts?.some((p) => p.functionCall || p.functionResponse))
+    .map((c, idx) => {
+      const parts = (c.parts || []).filter((p) => p.text || p.inlineData).map((p) => ({ ...p }));
+      if (idx === 0 && (sysText || schemaHint)) {
+        parts.unshift({ text: `${sysText}${schemaHint}\n\n` });
+      }
+      return { role: c.role === 'model' ? 'model' : 'user', parts };
+    })
+    .filter((c) => c.parts.length > 0);
+
+  return {
+    contents: clonedContents,
+    generationConfig: {
+      temperature: body.generationConfig?.temperature ?? 0.3,
+    },
+  };
 }
 
 async function rawGenerate(apiKey, model, body) {
   const cleanModel = model.replace(/^models\//, '');
   const url = `${API_BASE}/${encodeURIComponent(cleanModel)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const adapted = adaptBodyForModel(cleanModel, body);
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(adapted),
   });
   const data = await res.json().catch(() => ({}));
-  return { ok: res.ok, status: res.status, data };
+  return { ok: res.ok, status: res.status, data, usedModel: cleanModel };
 }
 
-async function callGemini(body) {
+async function callGemini(body, { requireTools = false } = {}) {
   const { apiKey, model } = getGeminiConfig();
   if (!apiKey) {
-    throw new Error('Falta tu API Key de Gemini en este dispositivo/navegador. Ábrela en Ajustes → IA (Gemini).');
+    throw new Error('Falta tu API Key de Gemini en Ajustes → IA (Gemini).');
   }
 
   let attempt = await rawGenerate(apiKey, model, body);
+  if (attempt.ok) return attempt.data;
 
-  // 1) If Google suggests a newer replacement model in its error message, adopt it immediately
-  if (!attempt.ok) {
-    const errMsg = String(attempt.data?.error?.message || '');
-    const suggestedMatch = errMsg.match(/models\/(gemini-[a-zA-Z0-9._-]+)/);
-    if (suggestedMatch && suggestedMatch[1] && suggestedMatch[1] !== model) {
-      const suggested = suggestedMatch[1];
-      setGeminiConfig({ model: suggested });
-      attempt = await rawGenerate(apiKey, suggested, body);
-    }
+  // Sweep across ALL available models (including Gemma-3-27b-it which runs on an uncongested cluster!)
+  let pool = [];
+  try {
+    const available = cachedModelsList || (await listGeminiModels());
+    pool = available.filter((m) => m !== model);
+  } catch {
+    pool = ['gemma-3-27b-it', 'gemma-3-12b-it', 'gemini-3.8-flash'];
   }
 
-  // 2) If model is experiencing temporary high demand (503 / 429) or 404, sweep across ALL usable models on the account!
-  if (
-    !attempt.ok &&
-    (isOverloadedError(attempt.status, attempt.data?.error?.message) ||
-      attempt.status === 404 ||
-      String(attempt.data?.error?.message || '').toLowerCase().includes('no longer available') ||
-      String(attempt.data?.error?.message || '').toLowerCase().includes('not found'))
-  ) {
-    let pool = [];
-    try {
-      const available = cachedModelsList || (await listGeminiModels());
-      pool = available.filter((m) => m !== model);
-    } catch {
-      pool = FALLBACK_CHAIN.filter((m) => m !== model);
-    }
-
-    const tried = [model];
-    for (const candidateModel of pool.slice(0, 10)) {
-      tried.push(candidateModel);
-      // Gemma models don't support systemInstruction or tools; skip them if request uses tools/schema
-      if (candidateModel.startsWith('gemma-') && (body.tools || body.systemInstruction || body.generationConfig?.responseSchema)) {
-        continue;
-      }
-      const backupAttempt = await rawGenerate(apiKey, candidateModel, body);
-      if (backupAttempt.ok) {
+  for (const candidateModel of pool) {
+    if (requireTools && candidateModel.startsWith('gemma-')) continue;
+    const backupAttempt = await rawGenerate(apiKey, candidateModel, body);
+    if (backupAttempt.ok) {
+      // Save working model if it's Gemini, or use Gemma seamlessly for this turn
+      if (candidateModel.startsWith('gemini-')) {
         setGeminiConfig({ model: candidateModel });
-        return backupAttempt.data;
       }
-    }
-
-    // Final retry on primary after short pause
-    await sleep(1000);
-    attempt = await rawGenerate(apiKey, getGeminiConfig().model, body);
-    if (!attempt.ok && isOverloadedError(attempt.status, attempt.data?.error?.message)) {
-      throw new Error(
-        `Tu API Key ya quedó guardada y es válida, pero los servidores de Google tienen alta demanda en este momento (probados: ${tried.slice(0, 5).join(', ')}). Espera 1 minuto y vuelve a intentar.`
-      );
+      return backupAttempt.data;
     }
   }
 
-  if (!attempt.ok) {
-    const msg = attempt.data?.error?.message || `Error ${attempt.status} al consultar Gemini`;
-    throw new Error(msg);
+  // If requireTools was true and all Gemini models had 503, fall back to Gemma conversational mode without tools!
+  if (requireTools) {
+    const gemmaModels = pool.filter((m) => m.startsWith('gemma-'));
+    for (const gm of gemmaModels) {
+      const backupAttempt = await rawGenerate(apiKey, gm, body);
+      if (backupAttempt.ok) return backupAttempt.data;
+    }
   }
-  return attempt.data;
+
+  const msg = attempt.data?.error?.message || `Error ${attempt.status} al consultar Gemini`;
+  const err = new Error(msg);
+  err.isOverloaded = isOverloadedError(attempt.status, msg);
+  throw err;
 }
 
 function extractTextFromResponse(res) {
@@ -276,19 +266,41 @@ export async function connectAndVerifyGemini(rawKey, preferredModel = '') {
   const targetModel = !cleanPref || isDeprecatedModel(cleanPref) ? DEFAULT_GEMINI_MODEL : cleanPref;
   setGeminiConfig({ apiKey: cleanKey, model: targetModel });
 
-  // Test generation directly first (callGemini will auto-upgrade if Google suggests a newer model!)
-  await testGeminiConnection();
-  const finalModel = getGeminiConfig().model;
-  return { apiKey: cleanKey, model: finalModel };
+  // Validate key against Google's models endpoint first (instant, never has 503 congestion!)
+  const models = await listGeminiModels();
+  if (!models.length) {
+    throw new Error('La clave no tiene modelos habilitados en Google AI Studio.');
+  }
+
+  // Pick a live uncongested model
+  let activeModel = models.includes(targetModel) ? targetModel : models[0];
+  try {
+    const probe = await rawGenerate(cleanKey, activeModel, {
+      contents: [{ role: 'user', parts: [{ text: 'OK' }] }],
+    });
+    if (!probe.ok) {
+      for (const m of models) {
+        if (m === activeModel) continue;
+        const p2 = await rawGenerate(cleanKey, m, {
+          contents: [{ role: 'user', parts: [{ text: 'OK' }] }],
+        });
+        if (p2.ok) {
+          activeModel = m;
+          break;
+        }
+      }
+    }
+  } catch {
+    // Key was already validated by listGeminiModels()
+  }
+
+  setGeminiConfig({ apiKey: cleanKey, model: activeModel });
+  return { apiKey: cleanKey, model: activeModel };
 }
 
 export async function testGeminiConnection() {
-  const res = await callGemini({
-    contents: [{ role: 'user', parts: [{ text: 'Responde solo OK' }] }],
-  });
-  if (!res?.candidates?.[0]) {
-    throw new Error('Respuesta vacía de Gemini. Revisa el modelo seleccionado.');
-  }
+  const { apiKey } = getGeminiConfig();
+  await connectAndVerifyGemini(apiKey, getGeminiConfig().model);
   return true;
 }
 
@@ -298,22 +310,22 @@ export async function testGeminiConnection() {
 const PRODUCT_SCHEMA = {
   type: 'OBJECT',
   properties: {
-    name: { type: 'STRING', description: 'Nombre claro y corto del producto en español' },
-    category: { type: 'STRING', description: `Categoría exacta de: ${CATEGORY_NAMES.join(', ')}` },
-    unit: { type: 'STRING', description: `Unidad exacta de: ${UNITS.join(', ')}` },
-    serving: { type: 'STRING', description: 'Descripción de 1 porción, ej. "1 scoop (30 g)" o "100 g"' },
-    servingsPerUnit: { type: 'NUMBER', description: 'Cantidad aproximada de porciones por envase/unidad' },
-    kcal: { type: 'NUMBER', description: 'Calorías por porción' },
-    protein: { type: 'NUMBER', description: 'Gramos de proteína por porción' },
-    proteinType: { type: 'STRING', description: 'animal, vegetal o suplemento' },
-    carbs: { type: 'NUMBER', description: 'Gramos totales de carbohidratos por porción' },
-    carbType: { type: 'STRING', description: 'complejo, simple o fibroso' },
-    fiber: { type: 'NUMBER', description: 'Gramos de fibra dietética por porción' },
-    sugar: { type: 'NUMBER', description: 'Gramos de azúcares por porción' },
-    fat: { type: 'NUMBER', description: 'Gramos totales de grasa por porción' },
-    satFat: { type: 'NUMBER', description: 'Gramos de grasa saturada por porción' },
-    unsatFat: { type: 'NUMBER', description: 'Gramos de grasas saludables/insaturadas por porción' },
-    sodium: { type: 'NUMBER', description: 'Miligramos (mg) de sodio por porción' },
+    name: { type: 'STRING' },
+    category: { type: 'STRING' },
+    unit: { type: 'STRING' },
+    serving: { type: 'STRING' },
+    servingsPerUnit: { type: 'NUMBER' },
+    kcal: { type: 'NUMBER' },
+    protein: { type: 'NUMBER' },
+    proteinType: { type: 'STRING' },
+    carbs: { type: 'NUMBER' },
+    carbType: { type: 'STRING' },
+    fiber: { type: 'NUMBER' },
+    sugar: { type: 'NUMBER' },
+    fat: { type: 'NUMBER' },
+    satFat: { type: 'NUMBER' },
+    unsatFat: { type: 'NUMBER' },
+    sodium: { type: 'NUMBER' },
   },
   required: ['name', 'category', 'unit', 'kcal', 'protein', 'carbs', 'fat'],
 };
@@ -329,8 +341,6 @@ export async function recognizeProduct(photoDataUrl) {
     `categoría (elige una de: ${CATEGORY_NAMES.join(', ')}), unidad (elige una de: ${UNITS.join(', ')}),`,
     'calorías, proteína y su tipo (animal/vegetal/suplemento), carbohidratos y su tipo (complejo/simple/fibroso),',
     'fibra, azúcares, grasas totales, grasas saturadas, grasas insaturadas/saludables y sodio (mg).',
-    'Si se ve la tabla nutrimental impresa, copia los números exactos. Si es un alimento fresco, usa valores estándar USDA.',
-    'Si es un artículo de limpieza/hogar (no comestible), deja todos los macros en 0 y servingsPerUnit en 1.',
   ].join(' ');
 
   const res = await callGemini({
@@ -346,21 +356,17 @@ export async function recognizeProduct(photoDataUrl) {
 }
 
 // =========================================================================
-// 2) Structured AI Inventory Recommendations
+// 2) Structured AI Inventory Recommendations (+ Smart Local Backup on 503)
 // =========================================================================
 const RECOMMENDATIONS_SCHEMA = {
   type: 'OBJECT',
   properties: {
-    headline: { type: 'STRING', description: 'Diagnóstico breve y motivador de 1 línea sobre la despensa' },
+    headline: { type: 'STRING' },
     insights: {
       type: 'ARRAY',
       items: {
         type: 'OBJECT',
-        properties: {
-          badge: { type: 'STRING' },
-          title: { type: 'STRING' },
-          detail: { type: 'STRING' },
-        },
+        properties: { badge: { type: 'STRING' }, title: { type: 'STRING' }, detail: { type: 'STRING' } },
         required: ['badge', 'title', 'detail'],
       },
     },
@@ -368,13 +374,7 @@ const RECOMMENDATIONS_SCHEMA = {
       type: 'ARRAY',
       items: {
         type: 'OBJECT',
-        properties: {
-          name: { type: 'STRING' },
-          category: { type: 'STRING' },
-          unit: { type: 'STRING' },
-          qty: { type: 'NUMBER' },
-          reason: { type: 'STRING' },
-        },
+        properties: { name: { type: 'STRING' }, category: { type: 'STRING' }, unit: { type: 'STRING' }, qty: { type: 'NUMBER' }, reason: { type: 'STRING' } },
         required: ['name', 'category', 'unit', 'qty', 'reason'],
       },
     },
@@ -382,13 +382,66 @@ const RECOMMENDATIONS_SCHEMA = {
   required: ['headline', 'insights', 'suggestedPurchases'],
 };
 
+function buildLocalFallbackRecommendations(inv, focus) {
+  const items = inv?.items || [];
+  const low = items.filter((i) => i.status !== 'Suficiente');
+  const days = inv?.proteinCoverageDays;
+  const goal = String(inv?.goal || 'mantenimiento').toLowerCase();
+  const sub = inv?.pantrySubtypes || { protein: {}, carbs: {}, fat: {} };
+
+  const headline = !items.length
+    ? `Arma tu despensa base para ${goal}: prioriza proteínas magras, carbos complejos y fibra.`
+    : days != null
+      ? `Tu despensa cubre ${days} días de proteína (${inv.pantryTotals?.protein || 0}g en stock) · ${low.length} artículos por reponer.`
+      : `Tienes ${items.length} productos (${inv?.pantryTotals?.protein || 0}g de proteína total) y ${low.length} por comprar.`;
+
+  const inStockNames = items.filter((i) => i.qty > 0).map((i) => i.name);
+  const insights = [
+    {
+      badge: low.length ? 'Reposición' : 'Stock al día',
+      title: low.length ? `${low.length} productos bajos o agotados` : 'Niveles óptimos de inventario',
+      detail: low.length
+        ? `Prioriza reponer: ${low.slice(0, 4).map((i) => i.name).join(', ')} para no cortar tu plan semanal.`
+        : 'Todos tus productos están por encima de su mínimo configurado.',
+    },
+    {
+      badge: 'Calidad Macros',
+      title: 'Distribución de fuentes en casa',
+      detail: `Proteína: ${sub.protein?.animal || 0}g animal, ${sub.protein?.vegetal || 0}g vegetal, ${sub.protein?.suplemento || 0}g supl. · Fibra total: ${inv?.pantryTotals?.fiber || 0}g.`,
+    },
+    {
+      badge: focus === 'meals' ? 'En tu cocina' : 'Estrategia',
+      title: focus === 'meals' && inStockNames.length ? 'Combina tu stock disponible' : `Enfoque ${inv?.goal || 'Fitness'}`,
+      detail:
+        focus === 'meals' && inStockNames.length
+          ? `Armado rápido con tu stock actual: combina ${inStockNames.slice(0, 3).join(' + ')} para una comida completa en macros.`
+          : goal.includes('defin')
+            ? 'Prioriza proteínas magras y verduras fibrosas de alta saciedad en tu próxima compra.'
+            : 'Asegura suficientes carbohidratos complejos (avena, arroz, papa) para sostener tus entrenamientos.',
+    },
+  ];
+
+  const existingSet = new Set(items.filter((i) => i.qty > i.min).map((i) => i.name.toLowerCase()));
+  const baseCatalog = [
+    { name: 'Pechuga de pollo', category: 'Proteínas', unit: 'kg', qty: 2, reason: 'Base proteica magra (31g P por 100g) para toda la semana.' },
+    { name: 'Atún en agua', category: 'Proteínas', unit: 'latas', qty: 6, reason: 'Proteína rápida no perecedera para emergencias.' },
+    { name: 'Huevo', category: 'Lácteos y huevo', unit: 'pzas', qty: 18, reason: 'Proteína de alto valor biológico y grasas saludables.' },
+    { name: 'Avena', category: 'Carbohidratos', unit: 'kg', qty: 1, reason: 'Carbohidrato complejo rico en fibra soluble.' },
+    { name: 'Brócoli', category: 'Frutas y verduras', unit: 'kg', qty: 1, reason: 'Aporta micronutrientes, fibra y volumen con pocas calorías.' },
+    { name: 'Yogur griego natural', category: 'Lácteos y huevo', unit: 'botes', qty: 2, reason: 'Excelente fuente de proteína rápida y probióticos.' },
+  ];
+  const suggestedPurchases = baseCatalog.filter((b) => !existingSet.has(b.name.toLowerCase())).slice(0, 4);
+
+  return { headline, insights, suggestedPurchases };
+}
+
 export async function generatePantryRecommendations({ inventorySummary, focus = 'general' }) {
   const isEmpty = !inventorySummary?.items?.length;
   const focusMap = {
     general: isEmpty
       ? 'La despensa está vacía todavía. Recomienda un kit base ideal de compras fitness según el objetivo del usuario.'
       : 'Analiza el balance general de la despensa, qué se está acabando, calidad de proteínas/carbos/grasas y qué conviene comprar.',
-    shopping: 'Enfócate en optimizar la próxima compra del súper según el objetivo fitness (definición/mantenimiento/volumen) y los huecos nutricionales.',
+    shopping: 'Enfócate en optimizar la próxima compra del súper según el objetivo fitness y los huecos nutricionales.',
     meals: isEmpty
       ? 'Sugiere 3 combinaciones fitness básicas que podrá preparar en cuanto compre sus básicos de despensa.'
       : 'Recomienda 3 combinaciones rápidas y altas en proteína que se pueden preparar HOY usando únicamente lo que hay con stock > 0, y qué ingrediente clave falta.',
@@ -402,16 +455,22 @@ export async function generatePantryRecommendations({ inventorySummary, focus = 
     JSON.stringify(inventorySummary),
   ].join('\n');
 
-  const res = await callGemini({
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    generationConfig: {
-      responseMimeType: 'application/json',
-      responseSchema: RECOMMENDATIONS_SCHEMA,
-      temperature: 0.35,
-    },
-  });
-
-  return parseJsonResponse(res, 'No se pudieron generar recomendaciones.');
+  try {
+    const res = await callGemini({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: RECOMMENDATIONS_SCHEMA,
+        temperature: 0.35,
+      },
+    });
+    return parseJsonResponse(res, 'No se pudieron generar recomendaciones.');
+  } catch (err) {
+    if (err?.isOverloaded) {
+      return buildLocalFallbackRecommendations(inventorySummary, focus);
+    }
+    throw err;
+  }
 }
 
 // =========================================================================
@@ -434,7 +493,7 @@ const COACH_TOOLS = [
       },
       {
         name: 'add_item',
-        description: 'Agrega un nuevo producto al inventario de la despensa (con su tabla nutrimental estimada o leída).',
+        description: 'Agrega un nuevo producto al inventario de la despensa.',
         parameters: {
           type: 'OBJECT',
           properties: {
@@ -448,9 +507,9 @@ const COACH_TOOLS = [
             servingsPerUnit: { type: 'NUMBER' },
             kcal: { type: 'NUMBER' },
             protein: { type: 'NUMBER' },
-            proteinType: { type: 'STRING', description: 'animal, vegetal o suplemento' },
+            proteinType: { type: 'STRING' },
             carbs: { type: 'NUMBER' },
-            carbType: { type: 'STRING', description: 'complejo, simple o fibroso' },
+            carbType: { type: 'STRING' },
             fiber: { type: 'NUMBER' },
             sugar: { type: 'NUMBER' },
             fat: { type: 'NUMBER' },
@@ -464,7 +523,7 @@ const COACH_TOOLS = [
       },
       {
         name: 'update_quantity',
-        description: 'Actualiza el stock de un artículo existente en la despensa (sumando compras o restando lo que se gastó).',
+        description: 'Actualiza el stock de un artículo existente en la despensa.',
         parameters: {
           type: 'OBJECT',
           properties: {
@@ -477,7 +536,7 @@ const COACH_TOOLS = [
       },
       {
         name: 'set_minimum',
-        description: 'Cambia el mínimo de alerta de un artículo para saber cuándo volver a comprarlo.',
+        description: 'Cambia el mínimo de alerta de un artículo.',
         parameters: {
           type: 'OBJECT',
           properties: {
@@ -489,7 +548,7 @@ const COACH_TOOLS = [
       },
       {
         name: 'mark_for_shopping',
-        description: 'Marca o desmarca un artículo existente para incluirlo en la lista de compras.',
+        description: 'Marca o desmarca un artículo para incluirlo en la lista de compras.',
         parameters: {
           type: 'OBJECT',
           properties: {
@@ -508,28 +567,32 @@ const SYSTEM_INSTRUCTION = {
     {
       text: [
         'Eres el Asistente IA de Inventario y Nutrición de FitDespensa en español.',
-        'La app está enfocada 100% en gestionar el inventario de la despensa fitness, autocompletar tablas nutrimentales y dar recomendaciones inteligentes de compra y uso del stock.',
-        'Reglas:',
-        '1. Consulta siempre get_inventory, get_pantry_analytics y get_shopping_list antes de dar recomendaciones. Nunca inventes productos que no están en la despensa.',
-        '2. Si el usuario manda una FOTO de uno o varios productos o etiquetas: extrae su tabla nutrimental completa (incluyendo tipo de proteína animal/vegetal/suplemento, tipo de carbos complejo/simple/fibroso, fibra, azúcares, grasas saturadas/insaturadas y sodio) y agrégalos con add_item (attachChatPhoto=true).',
-        '3. Si el usuario dice qué compró o qué se acabó (ej. "se acabó el pollo", "quedan 2 huevos", "compré 1 kg de avena"), actualiza el inventario de inmediato con update_quantity o add_item.',
-        '4. Da recomendaciones proactivas sobre qué reponer, qué fuentes de proteína/carbos/grasas faltan para balancear su despensa según su objetivo, y cómo aprovechar lo que ya tiene en casa.',
-        '5. Sé directo, claro y conciso con viñetas cortas.',
+        'Enfócate 100% en gestionar el inventario de la despensa fitness, autocompletar tablas nutrimentales y dar recomendaciones inteligentes de compra y uso del stock.',
+        'Sé directo, claro y conciso con viñetas cortas.',
       ].join('\n'),
     },
   ],
 };
 
 export async function runCoachTurn(history, userText, executor, photoDataUrl = null) {
+  // Always inject live inventory context so even non-tool fallback models (like Gemma-3) answer with 100% real pantry data!
+  let invSnap = null;
+  try {
+    invSnap = (await executor('get_pantry_analytics', {}))?.result || null;
+  } catch {
+    // ignore
+  }
+
   const userParts = [];
-  if (userText) userParts.push({ text: userText });
+  const contextNote = invSnap ? `[Contexto actual de mi despensa: ${JSON.stringify(invSnap)}]\n\n` : '';
+  if (userText) userParts.push({ text: `${contextNote}${userText}` });
   if (photoDataUrl) {
     const match = String(photoDataUrl).match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
     if (match) {
       userParts.push({ inlineData: { mimeType: match[1], data: match[2] } });
       if (!userText) {
         userParts.unshift({
-          text: 'Analiza esta foto de producto o despensa: extrae su tabla nutrimental completa y agrégalo o actualiza mi inventario.',
+          text: `${contextNote}Analiza esta foto de producto o despensa: extrae su tabla nutrimental completa y agrégalo o actualiza mi inventario.`,
         });
       }
     }
@@ -539,12 +602,15 @@ export async function runCoachTurn(history, userText, executor, photoDataUrl = n
   const actions = [];
 
   for (let step = 0; step < 6; step++) {
-    const res = await callGemini({
-      systemInstruction: SYSTEM_INSTRUCTION,
-      contents,
-      tools: COACH_TOOLS,
-      generationConfig: { temperature: 0.35 },
-    });
+    const res = await callGemini(
+      {
+        systemInstruction: SYSTEM_INSTRUCTION,
+        contents,
+        tools: COACH_TOOLS,
+        generationConfig: { temperature: 0.35 },
+      },
+      { requireTools: true }
+    );
 
     const candidate = res?.candidates?.[0];
     const modelContent = candidate?.content;
