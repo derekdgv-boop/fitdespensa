@@ -153,6 +153,46 @@ const COACH_TOOLS = [
         description: 'Obtiene el perfil fitness del usuario, sus metas diarias de macros, días de cobertura de proteína en despensa y lo que ha comido hoy.',
       },
       {
+        name: 'get_recipes',
+        description: 'Obtiene todas las recetas y comidas guardadas del usuario con sus macros e ingredientes.',
+      },
+      {
+        name: 'save_recipe',
+        description: 'Guarda una comida ya hecha o una receta recomendada en "Mis Recetas" para poder registrarla después con 1 toque.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            name: { type: 'STRING', description: 'Nombre atractivo y claro de la receta' },
+            meal: { type: 'STRING', enum: MEAL_IDS, description: 'Momento ideal del día' },
+            kcal: { type: 'NUMBER', description: 'Calorías totales por porción' },
+            protein: { type: 'NUMBER', description: 'Gramos de proteína por porción' },
+            carbs: { type: 'NUMBER', description: 'Gramos de carbohidratos por porción' },
+            fat: { type: 'NUMBER', description: 'Gramos de grasa por porción' },
+            ingredients: {
+              type: 'ARRAY',
+              items: { type: 'STRING' },
+              description: 'Lista corta de ingredientes con cantidades (ej. "150 g pechuga de pollo", "1 taza arroz")',
+            },
+            steps: { type: 'STRING', description: 'Preparación breve en 2-4 líneas' },
+            attachChatPhoto: { type: 'BOOLEAN', description: 'True si el usuario adjuntó una foto de este platillo en este mensaje' },
+          },
+          required: ['name', 'kcal', 'protein'],
+        },
+      },
+      {
+        name: 'log_recipe',
+        description: 'Registra en el diario de hoy una receta ya guardada en "Mis Recetas".',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            recipeName: { type: 'STRING', description: 'Nombre de la receta guardada' },
+            servings: { type: 'NUMBER', description: 'Número de porciones (default 1)' },
+            meal: { type: 'STRING', enum: MEAL_IDS },
+          },
+          required: ['recipeName'],
+        },
+      },
+      {
         name: 'add_item',
         description: 'Agrega un nuevo producto al inventario de la despensa.',
         parameters: {
@@ -169,6 +209,7 @@ const COACH_TOOLS = [
             protein: { type: 'NUMBER' },
             carbs: { type: 'NUMBER' },
             fat: { type: 'NUMBER' },
+            attachChatPhoto: { type: 'BOOLEAN', description: 'True si el usuario envió foto de este producto' },
           },
           required: ['name', 'qty'],
         },
@@ -224,24 +265,40 @@ const SYSTEM_INSTRUCTION = {
   parts: [
     {
       text: [
-        'Eres el Coach IA de FitDespensa, un asistente práctico de nutrición deportiva y gestión de despensa en español.',
-        'Reglas:',
-        '1. Consulta siempre las herramientas (get_inventory, get_profile_and_today, get_shopping_list) antes de recomendar comidas o hablar de existencias. Nunca inventes productos que el usuario no tiene.',
-        '2. Cuando el usuario diga que comió algo (ej. "me comí 3 huevos", "tomé un scoop de proteína"), usa log_food (que además descuenta de la despensa si existe). Si solo compró o gastó algo sin comerlo (ej. "compré 2 kg de pollo"), usa update_quantity o add_item.',
-        '3. Sé directo, motivador y conciso. Usa listas cortas y muestra proteína y calorías aproximadas cuando sugieras comidas.',
-        '4. No des diagnósticos ni consejos médicos; si surge un tema clínico, sugiere consultar a un nutriólogo o médico.',
+        'Eres el Coach IA de FitDespensa: un asistente conversacional súper fácil de usar para nutrición fitness, despensa y recetas en español.',
+        'Tu objetivo es que el usuario NO tenga que llenar formularios: tú haces el trabajo por él usando tus herramientas.',
+        'Reglas clave:',
+        '1. Si el usuario manda una FOTO de un platillo o comida preparada: identifica el platillo, estima sus macros realistas (kcal, proteína, carbs, grasas) y regístralo con log_food; si pide guardarlo como receta (o es un buen platillo casero), ofrécele guardarlo o usa save_recipe con attachChatPhoto=true.',
+        '2. Si el usuario manda una FOTO de un producto empaquetado o despensa: extrae nombre, categoría, unidad y macros, y agrégalo con add_item (attachChatPhoto=true).',
+        '3. Si el usuario dice qué comió (ej. "comí 3 huevos con avena", "me comí mi receta de pollo"): usa log_food (o log_recipe si coincide con una receta guardada). Si dice que compró algo, usa update_quantity o add_item.',
+        '4. Si el usuario pide ideas de comida, consulta primero get_inventory, get_profile_and_today y get_recipes. Nunca inventes productos que no tiene. Al final pregunta brevemente si quiere guardar la idea en "Mis Recetas" o registrarla.',
+        '5. Sé cercano, directo, claro y breve (usa negritas y viñetas cortas). No des diagnósticos médicos.',
       ].join('\n'),
     },
   ],
 };
 
 /**
- * Runs a conversational turn with function-calling loop.
+ * Runs a conversational turn (text + optional compressed JPEG photo) with function-calling loop.
  * `history` is an array of Gemini content objects ({ role, parts }).
  * `executor(name, args)` returns { result, action? }.
  */
-export async function runCoachTurn(history, userText, executor) {
-  const contents = [...history, { role: 'user', parts: [{ text: userText }] }];
+export async function runCoachTurn(history, userText, executor, photoDataUrl = null) {
+  const userParts = [];
+  if (userText) userParts.push({ text: userText });
+  if (photoDataUrl) {
+    const match = String(photoDataUrl).match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+    if (match) {
+      userParts.push({ inlineData: { mimeType: match[1], data: match[2] } });
+      if (!userText) {
+        userParts.unshift({
+          text: 'Analiza esta foto: si es un platillo/comida lista, estima sus macros y pregúntame o regístrala; si es un producto de despensa, agrégalo a mi inventario.',
+        });
+      }
+    }
+  }
+
+  const contents = [...history, { role: 'user', parts: userParts }];
   const actions = [];
 
   for (let step = 0; step < 6; step++) {

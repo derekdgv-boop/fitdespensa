@@ -39,6 +39,99 @@ const SVG_EDIT = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" st
 const SVG_FORK = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2M7 2v20M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>`;
 const SVG_TRASH = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`;
 const SVG_CHECK = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`;
+const SVG_STAR = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
+
+// =========================================================================
+// 0) LIVE TELEMETRY STRIP (Top of Coach IA)
+// =========================================================================
+export function renderLiveStrip({ items, profile, todayLogs }) {
+  const targets = calcTargets(profile);
+  const totals = pantryTotals(items);
+  const cov = coverageDays(totals, targets);
+  const eaten = logTotals(todayLogs);
+  const lowCount = items.filter(inShoppingList).length;
+
+  const protPct = targets?.protein > 0 ? Math.min(100, Math.round((eaten.protein / targets.protein) * 100)) : 0;
+  const kcalPct = targets?.kcal > 0 ? Math.min(100, Math.round((eaten.kcal / targets.kcal) * 100)) : 0;
+
+  return `
+    <button type="button" class="live-pill" data-action="go-diary">
+      <span class="live-pill-label">Proteína hoy</span>
+      <span class="live-pill-val" style="color:var(--primary)">${Math.round(eaten.protein)}${targets ? ` / ${targets.protein}g` : 'g'}</span>
+      <div class="progress-track"><div class="progress-fill" style="width:${protPct}%"></div></div>
+    </button>
+    <button type="button" class="live-pill" data-action="go-diary">
+      <span class="live-pill-label">Calorías hoy</span>
+      <span class="live-pill-val" style="color:var(--accent)">${Math.round(eaten.kcal)}${targets ? ` / ${targets.kcal}` : ' kcal'}</span>
+      <div class="progress-track"><div class="progress-fill kcal" style="width:${kcalPct}%"></div></div>
+    </button>
+    <button type="button" class="live-pill" data-action="${targets ? 'go-catalog' : 'open-settings'}">
+      <span class="live-pill-label">Despensa</span>
+      <span class="live-pill-val">${cov?.protein != null ? `${cov.protein.toFixed(1)} días` : `${items.length} prod.`}</span>
+      <span class="live-pill-sub">${targets ? 'de proteína en casa' : 'Toca para poner meta'}</span>
+    </button>
+    <button type="button" class="live-pill" data-action="go-shopping">
+      <span class="live-pill-label">Por comprar</span>
+      <span class="live-pill-val" style="color:${lowCount ? 'var(--accent)' : 'var(--ok)'}">${lowCount}</span>
+      <span class="live-pill-sub">${lowCount ? 'artículos bajos' : 'todo surtido'}</span>
+    </button>
+  `;
+}
+
+// =========================================================================
+// RECIPES GRID
+// =========================================================================
+export function renderRecipes(recipes) {
+  if (!recipes.length) {
+    return `
+      <div class="empty-state" style="grid-column: 1 / -1">
+        <h3>Aún no tienes recetas guardadas</h3>
+        <p>Pídele al Coach IA que guarde tus comidas ya hechas como receta, o toca la estrella en cualquier comida de tu Diario.</p>
+        <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
+          <button type="button" class="btn btn-primary btn-sm" data-action="go-coach">Pedir al Coach IA</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-action="new-recipe">+ Crear manual</button>
+        </div>
+      </div>
+    `;
+  }
+
+  return recipes
+    .map((r) => {
+      const mealObj = MEALS.find((m) => m.id === r.meal) || MEALS[1];
+      const media = r.photo
+        ? `<img src="${r.photo}" alt="${esc(r.name)}" loading="lazy" />`
+        : `<span style="font-size:2.4rem;">${mealObj.icon}</span>`;
+      const ingText = r.ingredients?.length ? r.ingredients.join(' · ') : r.steps || 'Sin ingredientes detallados';
+
+      return `
+        <article class="recipe-card">
+          <div class="recipe-media">
+            ${media}
+            <span class="recipe-meal-badge">${esc(mealObj.label)}</span>
+          </div>
+          <div class="recipe-body">
+            <h3 class="item-name">${esc(r.name)}</h3>
+            <div class="macro-tags">
+              <span class="macro-tag prot">${r.protein}g PRO</span>
+              <span class="macro-tag kcal">${r.kcal} kcal</span>
+              ${r.carbs ? `<span class="macro-tag">C ${r.carbs}g</span>` : ''}
+              ${r.fat ? `<span class="macro-tag">G ${r.fat}g</span>` : ''}
+            </div>
+            <div class="recipe-ing">${esc(ingText)}</div>
+            <div class="recipe-footer">
+              <button type="button" class="btn btn-primary btn-sm flex-1" data-action="eat-recipe" data-id="${esc(r.id)}">
+                ${SVG_FORK}
+                <span>Comí esto</span>
+              </button>
+              <button type="button" class="icon-btn icon-btn-sm" data-action="edit-recipe" data-id="${esc(r.id)}" title="Editar receta">${SVG_EDIT}</button>
+              <button type="button" class="icon-btn icon-btn-sm" data-action="delete-recipe" data-id="${esc(r.id)}" title="Eliminar receta">${SVG_TRASH}</button>
+            </div>
+          </div>
+        </article>
+      `;
+    })
+    .join('');
+}
 
 function renderRing(label, value, target, unit, color) {
   const r = 39;
@@ -416,7 +509,10 @@ export function renderDiaryMeals(entries) {
                 ${round(e.servings, 2)} porc. · ${Math.round(e.kcal || 0)} kcal · P ${round(e.protein || 0, 1)}g · C ${round(e.carbs || 0, 1)}g · G ${round(e.fat || 0, 1)}g
               </div>
             </div>
-            <button type="button" class="icon-btn icon-btn-sm" data-action="delete-log" data-id="${esc(e.id)}" title="Eliminar registro">${SVG_TRASH}</button>
+            <div style="display:flex; gap:6px;">
+              <button type="button" class="icon-btn icon-btn-sm" data-action="save-log-recipe" data-id="${esc(e.id)}" title="Guardar como receta">${SVG_STAR}</button>
+              <button type="button" class="icon-btn icon-btn-sm" data-action="delete-log" data-id="${esc(e.id)}" title="Eliminar registro">${SVG_TRASH}</button>
+            </div>
           </div>
         `
       )

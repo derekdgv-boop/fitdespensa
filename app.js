@@ -1,4 +1,4 @@
-// app.js — FitDespensa orchestrator
+// app.js — FitDespensa AI-First orchestrator (Multimodal Coach, Voice, Recipes, Pantry)
 import { CATEGORIES, MEALS, UNITS } from './constants.js';
 import {
   STATUS_LABEL,
@@ -22,9 +22,17 @@ import {
   pantryTotals,
   todayStr,
 } from './nutrition.js';
-import { getHouseholdCode, initStorage, setHouseholdCode } from './storage.js?v=5';
-import { canUseWebcam, compressFile, dataUrlByteSize, isMobileDevice, startWebcam } from './camera.js?v=5';
-import { getGeminiConfig, hasGeminiKey, listGeminiModels, recognizeProduct, runCoachTurn, setGeminiConfig, testGeminiConnection } from './ai.js?v=7';
+import { getHouseholdCode, initStorage, setHouseholdCode } from './storage.js?v=8';
+import { canUseWebcam, compressFile, dataUrlByteSize, isMobileDevice, startWebcam } from './camera.js?v=8';
+import {
+  getGeminiConfig,
+  hasGeminiKey,
+  listGeminiModels,
+  recognizeProduct,
+  runCoachTurn,
+  setGeminiConfig,
+  testGeminiConnection,
+} from './ai.js?v=8';
 import {
   esc,
   formatCoachText,
@@ -33,9 +41,10 @@ import {
   renderCategoryChips,
   renderDiaryMeals,
   renderDiarySummary,
-  renderPanel,
+  renderLiveStrip,
+  renderRecipes,
   renderShoppingList,
-} from './ui.js?v=5';
+} from './ui.js?v=8';
 
 const SVG_SUN = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>`;
 const SVG_MOON = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>`;
@@ -43,7 +52,7 @@ const SVG_CAMERA_PLACEHOLDER = `<svg viewBox="0 0 24 24" width="28" height="28" 
 
 const WELCOME_MSG = {
   role: 'ai',
-  text: 'Hola, soy tu **Coach IA de FitDespensa**.\n\nPuedo sugerirte comidas con lo que tienes en casa, registrar lo que comiste descontándolo de tu despensa o armar tu lista de compras fitness.',
+  text: '¡Hola! Soy tu **Coach IA de FitDespensa**.\n\nSolo **escríbeme, háblame con el micrófono o mándame una foto**:\n• Foto de tu plato → estimo macros y lo subo a tu diario\n• «Me comí 3 huevos con avena» → lo registro y descuento de tu despensa\n• «Guarda esta comida como receta» → queda lista en **Mis Recetas** para repetirla en 1 toque',
 };
 
 // =========================================================================
@@ -52,8 +61,10 @@ const WELCOME_MSG = {
 const state = {
   store: null,
   items: [],
+  recipes: [],
   profile: null,
-  activeTab: 'panel',
+  activeTab: 'coach',
+  mealsSub: 'today',
   search: '',
   category: 'Todas',
   stockFilter: 'all',
@@ -63,7 +74,11 @@ const state = {
   todayLogs: [],
   unsubDiary: null,
   currentPhoto: null,
+  currentRecipePhoto: null,
+  pendingChatPhoto: null,
+  activeTurnPhoto: null,
   webcam: null,
+  speechRec: null,
   chatHistory: [],
   chatUi: [WELCOME_MSG],
   chatBusy: false,
@@ -114,18 +129,13 @@ function renderAll() {
     b.classList.toggle('hidden', shopCount === 0);
   }
 
-  // Sidebar quick coverage widget
   const targets = calcTargets(state.profile);
   const totals = pantryTotals(state.items);
   const cov = coverageDays(totals, targets);
   $('sidebarCoverageVal').textContent =
     cov?.protein != null ? `${cov.protein.toFixed(1)} días de proteína` : `${totals.protein} g en stock`;
 
-  // Panel date subtitle
-  const nowLabel = new Date().toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
-  $('panelDateSub').textContent = nowLabel.charAt(0).toUpperCase() + nowLabel.slice(1);
-
-  $('panelContent').innerHTML = renderPanel({
+  $('liveSummaryStrip').innerHTML = renderLiveStrip({
     items: state.items,
     profile: state.profile,
     todayLogs: state.todayLogs,
@@ -148,13 +158,16 @@ function renderAll() {
   $('diarySummary').innerHTML = renderDiarySummary(state.diaryLogs, state.profile);
   $('diaryMeals').innerHTML = renderDiaryMeals(state.diaryLogs);
 
+  $('recipesCountBadge').textContent = state.recipes.length ? `(${state.recipes.length})` : '';
+  $('recipesList').innerHTML = renderRecipes(state.recipes);
+
   $('shoppingList').innerHTML = renderShoppingList(state.items);
 
   const keyReady = hasGeminiKey();
   $('coachKeyBanner').classList.toggle('hidden', keyReady);
   $('coachStatusSub').textContent = keyReady
-    ? `Gemini (${getGeminiConfig().model}) conectado a tu inventario y diario`
-    : 'Configura tu clave de Gemini en Ajustes para comenzar';
+    ? `${getGeminiConfig().model} · Manda texto, voz o foto`
+    : 'Configura tu clave de Gemini en Ajustes';
 
   renderChat();
 }
@@ -166,7 +179,28 @@ function renderChat() {
     if (entry.type === 'action') {
       const card = document.createElement('div');
       card.className = 'action-card';
-      card.innerHTML = `<span>${esc(entry.label)}</span>`;
+      const labelEl = document.createElement('span');
+      labelEl.textContent = entry.label;
+      card.appendChild(labelEl);
+
+      const btns = document.createElement('div');
+      btns.className = 'action-card-actions';
+
+      if (entry.saveRecipeData && !entry.recipeSaved) {
+        const recBtn = document.createElement('button');
+        recBtn.type = 'button';
+        recBtn.className = 'btn btn-primary btn-xs';
+        recBtn.textContent = '★ Guardar receta';
+        recBtn.onclick = async () => {
+          recBtn.disabled = true;
+          await state.store.saveRecipe(entry.saveRecipeData);
+          entry.recipeSaved = true;
+          renderChat();
+          toast('Guardada en Mis Recetas');
+        };
+        btns.appendChild(recBtn);
+      }
+
       if (entry.undo && !entry.undone) {
         const btn = document.createElement('button');
         btn.type = 'button';
@@ -185,14 +219,27 @@ function renderChat() {
             btn.disabled = false;
           }
         };
-        card.appendChild(btn);
+        btns.appendChild(btn);
       }
+
+      if (btns.childElementCount) card.appendChild(btns);
       box.appendChild(card);
     } else {
       const bubble = document.createElement('div');
       bubble.className = `msg ${entry.role === 'user' ? 'msg-user' : 'msg-ai'}`;
-      if (entry.role === 'ai') bubble.innerHTML = formatCoachText(entry.text);
-      else bubble.textContent = entry.text;
+      if (entry.photo) {
+        const img = document.createElement('img');
+        img.src = entry.photo;
+        img.className = 'msg-photo';
+        img.alt = 'Foto enviada';
+        bubble.appendChild(img);
+      }
+      if (entry.text) {
+        const span = document.createElement('div');
+        if (entry.role === 'ai') span.innerHTML = formatCoachText(entry.text);
+        else span.textContent = entry.text;
+        bubble.appendChild(span);
+      }
       box.appendChild(bubble);
     }
   }
@@ -216,6 +263,15 @@ function switchTab(tab) {
     v.classList.toggle('active', v.id === `view-${tab}`);
   });
   renderAll();
+}
+
+function switchMealsSub(sub) {
+  state.mealsSub = sub;
+  document.querySelectorAll('[data-meals-sub]').forEach((b) =>
+    b.classList.toggle('active', b.dataset.mealsSub === sub)
+  );
+  $('subview-today').classList.toggle('hidden', sub !== 'today');
+  $('subview-recipes').classList.toggle('hidden', sub !== 'recipes');
 }
 
 function switchSettingsTab(stab) {
@@ -242,12 +298,65 @@ function setDiaryDate(dateStr) {
 }
 
 // =========================================================================
+// Chat Photo Attachment & Voice Dictation
+// =========================================================================
+function setPendingChatPhoto(dataUrl) {
+  state.pendingChatPhoto = dataUrl || null;
+  if (state.pendingChatPhoto) {
+    $('chatAttachPreview').src = state.pendingChatPhoto;
+    $('chatAttachBar').classList.remove('hidden');
+  } else {
+    $('chatAttachBar').classList.add('hidden');
+    $('chatAttachPreview').removeAttribute('src');
+  }
+}
+
+function toggleVoiceInput() {
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRec) {
+    toast('Tu navegador no soporta dictado por voz. Prueba en Chrome o Safari.');
+    return;
+  }
+  const btn = $('chatVoiceBtn');
+  if (state.speechRec) {
+    state.speechRec.stop();
+    return;
+  }
+
+  const rec = new SpeechRec();
+  rec.lang = 'es-MX';
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+  state.speechRec = rec;
+  btn.classList.add('listening');
+  toast('Escuchando... habla ahora');
+
+  rec.onresult = (e) => {
+    const transcript = e.results?.[0]?.[0]?.transcript || '';
+    if (transcript) {
+      $('chatInput').value = transcript;
+      $('chatInput').focus();
+    }
+  };
+  rec.onerror = (e) => {
+    if (e.error !== 'aborted') toast('No se pudo escuchar: ' + e.error);
+  };
+  rec.onend = () => {
+    state.speechRec = null;
+    btn.classList.remove('listening');
+  };
+  rec.start();
+}
+
+// =========================================================================
 // Item Modal + Camera + AI Photo Scan
 // =========================================================================
 function populateStaticSelects() {
   $('itemCategory').innerHTML = CATEGORIES.map((c) => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('');
   $('itemUnit').innerHTML = UNITS.map((u) => `<option value="${esc(u)}">${esc(u)}</option>`).join('');
-  $('logMeal').innerHTML = MEALS.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('');
+  const mealOpts = MEALS.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('');
+  $('logMeal').innerHTML = mealOpts;
+  $('recipeMeal').innerHTML = mealOpts;
   $('profActivity').innerHTML = ACTIVITY_LEVELS.map((a) => `<option value="${esc(a.id)}">${esc(a.label)}</option>`).join('');
   $('profGoal').innerHTML = GOALS.map((g) => `<option value="${esc(g.id)}">${esc(g.label)}</option>`).join('');
 }
@@ -266,6 +375,18 @@ function setModalPhoto(dataUrl) {
     $('photoMeta').textContent = 'Se comprime automáticamente (~30 KB) junto al producto';
     $('removePhotoBtn').classList.add('hidden');
     $('scanPhotoBtn').classList.add('hidden');
+  }
+}
+
+function setRecipeModalPhoto(dataUrl) {
+  state.currentRecipePhoto = dataUrl || null;
+  const preview = $('recipePhotoPreview');
+  if (state.currentRecipePhoto) {
+    preview.innerHTML = `<img src="${state.currentRecipePhoto}" alt="Foto receta" />`;
+    $('removeRecipePhotoBtn').classList.remove('hidden');
+  } else {
+    preview.innerHTML = SVG_CAMERA_PLACEHOLDER;
+    $('removeRecipePhotoBtn').classList.add('hidden');
   }
 }
 
@@ -290,12 +411,36 @@ function openItemModal(item = null) {
   $('itemModal').classList.remove('hidden');
 }
 
-async function handlePhotoFile(file) {
+function openRecipeModal(recipe = null) {
+  $('recipeForm').reset();
+  $('recipeId').value = recipe?.id || '';
+  $('recipeModalTitle').textContent = recipe?.id ? 'Editar receta' : 'Guardar receta';
+  $('recipeName').value = recipe?.name || '';
+  $('recipeMeal').value = recipe?.meal || defaultMeal();
+  $('recipeKcal').value = recipe?.kcal ?? 0;
+  $('recipeProtein').value = recipe?.protein ?? 0;
+  $('recipeCarbs').value = recipe?.carbs ?? 0;
+  $('recipeFat').value = recipe?.fat ?? 0;
+  $('recipeIngredients').value = Array.isArray(recipe?.ingredients) ? recipe.ingredients.join('\n') : '';
+  $('recipeSteps').value = recipe?.steps || '';
+  $('deleteRecipeBtn').classList.toggle('hidden', !recipe?.id);
+  setRecipeModalPhoto(recipe?.photo || null);
+  $('recipeModal').classList.remove('hidden');
+}
+
+async function handlePhotoFile(file, target = 'item') {
   if (!file) return;
   try {
     const dataUrl = await compressFile(file);
-    setModalPhoto(dataUrl);
-    toast('Foto agregada');
+    if (target === 'chat') {
+      setPendingChatPhoto(dataUrl);
+    } else if (target === 'recipe') {
+      setRecipeModalPhoto(dataUrl);
+      toast('Foto agregada a la receta');
+    } else {
+      setModalPhoto(dataUrl);
+      toast('Foto agregada');
+    }
   } catch (err) {
     toast(err.message);
   }
@@ -431,7 +576,7 @@ function updateProfilePreview() {
   `;
 }
 
-function openSettingsModal(initialTab = 'profile') {
+function openSettingsModal(initialTab = 'ai') {
   const p = state.profile || {};
   $('profSex').value = p.sex || 'h';
   $('profAge').value = p.age || '';
@@ -460,15 +605,15 @@ function openSettingsModal(initialTab = 'profile') {
 }
 
 // =========================================================================
-// Coach IA Tool Executor (with Undo support)
+// Coach IA Tool Executor (with Undo & Recipe quick-save)
 // =========================================================================
-function findItemByName(name) {
+function findByName(list, name) {
   const target = normText(name);
   if (!target) return null;
   return (
-    state.items.find((i) => normText(i.name) === target) ||
-    state.items.find((i) => normText(i.name).includes(target)) ||
-    state.items.find((i) => target.includes(normText(i.name))) ||
+    list.find((i) => normText(i.name) === target) ||
+    list.find((i) => normText(i.name).includes(target)) ||
+    list.find((i) => target.includes(normText(i.name))) ||
     null
   );
 }
@@ -512,6 +657,23 @@ async function executeCoachTool(name, args) {
     };
   }
 
+  if (name === 'get_recipes') {
+    return {
+      result: {
+        count: state.recipes.length,
+        recipes: state.recipes.map((r) => ({
+          name: r.name,
+          meal: r.meal,
+          kcal: r.kcal,
+          protein: r.protein,
+          carbs: r.carbs,
+          fat: r.fat,
+          ingredients: r.ingredients,
+        })),
+      },
+    };
+  }
+
   if (name === 'get_profile_and_today') {
     const targets = calcTargets(state.profile);
     const totals = pantryTotals(state.items);
@@ -544,6 +706,57 @@ async function executeCoachTool(name, args) {
     };
   }
 
+  if (name === 'save_recipe') {
+    const saved = await state.store.saveRecipe({
+      name: args.name,
+      meal: args.meal || defaultMeal(),
+      kcal: args.kcal,
+      protein: args.protein,
+      carbs: args.carbs || 0,
+      fat: args.fat || 0,
+      ingredients: Array.isArray(args.ingredients) ? args.ingredients : [],
+      steps: args.steps || '',
+      photo: args.attachChatPhoto ? state.activeTurnPhoto : null,
+    });
+    return {
+      result: { ok: true, recipe: { name: saved.name, kcal: saved.kcal, protein: saved.protein } },
+      action: {
+        type: 'action',
+        label: `Receta guardada: "${saved.name}" (${saved.kcal} kcal · ${saved.protein}g PRO)`,
+        undo: () => state.store.deleteRecipe(saved.id),
+      },
+    };
+  }
+
+  if (name === 'log_recipe') {
+    const rec = findByName(state.recipes, args.recipeName);
+    if (!rec) return { result: { ok: false, error: `No encontré la receta "${args.recipeName}".` } };
+    const servings = Math.max(0.25, Number(args.servings) || 1);
+    const date = todayStr();
+    const entry = {
+      date,
+      meal: args.meal || rec.meal || defaultMeal(),
+      itemId: null,
+      recipeId: rec.id,
+      name: rec.name,
+      servings,
+      kcal: round(rec.kcal * servings, 1),
+      protein: round(rec.protein * servings, 1),
+      carbs: round(rec.carbs * servings, 1),
+      fat: round(rec.fat * servings, 1),
+      unitsUsed: 0,
+    };
+    const savedLog = await state.store.addLog(entry);
+    return {
+      result: { ok: true, logged: entry },
+      action: {
+        type: 'action',
+        label: `Registrada receta "${rec.name}" (${Math.round(entry.kcal)} kcal · ${entry.protein}g PRO)`,
+        undo: () => state.store.deleteLog(savedLog.id, date),
+      },
+    };
+  }
+
   if (name === 'add_item') {
     const saved = await state.store.saveItem({
       name: args.name,
@@ -557,19 +770,20 @@ async function executeCoachTool(name, args) {
       protein: args.protein ?? null,
       carbs: args.carbs ?? null,
       fat: args.fat ?? null,
+      photo: args.attachChatPhoto ? state.activeTurnPhoto : null,
     });
     return {
       result: { ok: true, item: { name: saved.name, qty: saved.qty, unit: saved.unit } },
       action: {
         type: 'action',
-        label: `Agregado "${saved.name}" (${saved.qty} ${saved.unit})`,
+        label: `Agregado a despensa: "${saved.name}" (${saved.qty} ${saved.unit})`,
         undo: () => state.store.deleteItem(saved.id),
       },
     };
   }
 
   if (name === 'update_quantity') {
-    const item = findItemByName(args.itemName);
+    const item = findByName(state.items, args.itemName);
     if (!item) return { result: { ok: false, error: `No encontré "${args.itemName}" en la despensa.` } };
     const prev = { ...item };
     const nextQty =
@@ -588,7 +802,7 @@ async function executeCoachTool(name, args) {
   }
 
   if (name === 'set_minimum') {
-    const item = findItemByName(args.itemName);
+    const item = findByName(state.items, args.itemName);
     if (!item) return { result: { ok: false, error: `No encontré "${args.itemName}" en la despensa.` } };
     const prev = { ...item };
     const nextMin = Math.max(0, round(args.min, 4));
@@ -607,7 +821,7 @@ async function executeCoachTool(name, args) {
     const servings = Math.max(0.1, Number(args.servings) || 1);
     const meal = args.meal || defaultMeal();
     const deduct = args.deductInventory !== false;
-    const item = findItemByName(args.itemName);
+    const item = findByName(state.items, args.itemName);
     const date = todayStr();
 
     let prevItem = null;
@@ -652,7 +866,16 @@ async function executeCoachTool(name, args) {
       },
       action: {
         type: 'action',
-        label: `Registrado: ${entryPayload.name} (${servings} porc., ${Math.round(entryPayload.kcal)} kcal, ${entryPayload.protein}g PRO)${prevItem ? ' y descontado' : ''}`,
+        label: `Registrado: ${entryPayload.name} (${Math.round(entryPayload.kcal)} kcal · ${entryPayload.protein}g PRO)${prevItem ? ' y descontado' : ''}`,
+        saveRecipeData: {
+          name: entryPayload.name,
+          meal: entryPayload.meal,
+          kcal: entryPayload.kcal,
+          protein: entryPayload.protein,
+          carbs: entryPayload.carbs,
+          fat: entryPayload.fat,
+          photo: state.activeTurnPhoto || null,
+        },
         undo: async () => {
           await state.store.deleteLog(savedLog.id, date);
           if (prevItem) await state.store.saveItem(prevItem);
@@ -666,20 +889,23 @@ async function executeCoachTool(name, args) {
 
 async function sendChatMessage(text) {
   const clean = text.trim();
-  if (!clean || state.chatBusy) return;
+  const photo = state.pendingChatPhoto;
+  if ((!clean && !photo) || state.chatBusy) return;
   if (!hasGeminiKey()) {
     toast('Agrega tu Gemini API Key en Ajustes para usar el Coach IA.');
     openSettingsModal('ai');
     return;
   }
 
-  state.chatUi.push({ role: 'user', text: clean });
+  setPendingChatPhoto(null);
+  state.activeTurnPhoto = photo;
+  state.chatUi.push({ role: 'user', text: clean || '📷 Foto enviada', photo });
   state.chatBusy = true;
   $('chatSendBtn').disabled = true;
   renderChat();
 
   try {
-    const res = await runCoachTurn(state.chatHistory, clean, executeCoachTool);
+    const res = await runCoachTurn(state.chatHistory, clean, executeCoachTool, photo);
     state.chatHistory = res.history;
     for (const act of res.actions) {
       state.chatUi.push(act);
@@ -688,6 +914,7 @@ async function sendChatMessage(text) {
   } catch (err) {
     state.chatUi.push({ role: 'ai', text: `Error: ${err.message}` });
   } finally {
+    state.activeTurnPhoto = null;
     state.chatBusy = false;
     $('chatSendBtn').disabled = false;
     renderChat();
@@ -721,15 +948,27 @@ function bindEvents() {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
 
+  document.querySelectorAll('[data-meals-sub]').forEach((btn) => {
+    btn.addEventListener('click', () => switchMealsSub(btn.dataset.mealsSub));
+  });
+
   document.querySelectorAll('.stab').forEach((btn) => {
     btn.addEventListener('click', () => switchSettingsTab(btn.dataset.stab));
   });
 
   $('sidebarAddBtn').addEventListener('click', () => openItemModal(null));
   $('mobileAddBtn').addEventListener('click', () => openItemModal(null));
-  $('panelAddBtn').addEventListener('click', () => openItemModal(null));
   $('catalogAddBtn').addEventListener('click', () => openItemModal(null));
-  $('panelLogBtn').addEventListener('click', () => openLogModal());
+  $('newRecipeBtn').addEventListener('click', () => openRecipeModal(null));
+
+  // Chat photo & voice
+  $('chatPhotoBtn').addEventListener('click', () => $('chatPhotoInput').click());
+  $('chatPhotoInput').addEventListener('change', (e) => {
+    handlePhotoFile(e.target.files?.[0], 'chat');
+    e.target.value = '';
+  });
+  $('removeChatPhotoBtn').addEventListener('click', () => setPendingChatPhoto(null));
+  $('chatVoiceBtn').addEventListener('click', toggleVoiceInput);
 
   $('searchInput').addEventListener('input', (e) => {
     state.search = e.target.value;
@@ -771,10 +1010,12 @@ function bindEvents() {
     const { action, id, dir, meal } = btn.dataset;
 
     if (action === 'open-settings') openSettingsModal('profile');
-    else if (action === 'go-diary') switchTab('diary');
+    else if (action === 'go-diary') { switchTab('diary'); switchMealsSub('today'); }
+    else if (action === 'go-catalog') switchTab('catalog');
     else if (action === 'go-shopping') switchTab('shopping');
     else if (action === 'go-coach') switchTab('coach');
     else if (action === 'new-item') openItemModal(null);
+    else if (action === 'new-recipe') openRecipeModal(null);
     else if (action === 'open-log') openLogModal();
     else if (action === 'open-log-meal') openLogModal('', meal);
     else if (action === 'seed-sample') {
@@ -797,6 +1038,18 @@ function bindEvents() {
       const bought = toBuy(it);
       await state.store.saveItem({ ...it, qty: round(it.qty + bought, 4), needBuy: false });
       toast(`+${bought} ${it.unit} de ${it.name}`);
+    } else if (action === 'save-log-recipe') {
+      const entry = state.diaryLogs.find((x) => x.id === id);
+      if (entry) {
+        openRecipeModal({
+          name: entry.name,
+          meal: entry.meal,
+          kcal: Math.round(entry.kcal || 0),
+          protein: round(entry.protein || 0, 1),
+          carbs: round(entry.carbs || 0, 1),
+          fat: round(entry.fat || 0, 1),
+        });
+      }
     } else if (action === 'delete-log') {
       const entry = state.diaryLogs.find((x) => x.id === id);
       await state.store.deleteLog(id, state.diaryDate);
@@ -807,6 +1060,29 @@ function bindEvents() {
         }
       }
       toast('Registro eliminado');
+    } else if (action === 'eat-recipe') {
+      const rec = state.recipes.find((r) => r.id === id);
+      if (!rec) return;
+      await state.store.addLog({
+        date: todayStr(),
+        meal: rec.meal || defaultMeal(),
+        itemId: null,
+        recipeId: rec.id,
+        name: rec.name,
+        servings: 1,
+        kcal: rec.kcal,
+        protein: rec.protein,
+        carbs: rec.carbs,
+        fat: rec.fat,
+        unitsUsed: 0,
+      });
+      toast(`"${rec.name}" registrada en tu diario de hoy`);
+    } else if (action === 'edit-recipe') {
+      const rec = state.recipes.find((r) => r.id === id);
+      if (rec) openRecipeModal(rec);
+    } else if (action === 'delete-recipe') {
+      await state.store.deleteRecipe(id);
+      toast('Receta eliminada');
     }
   });
 
@@ -840,6 +1116,7 @@ function bindEvents() {
   $('clearChatBtn').addEventListener('click', () => {
     state.chatHistory = [];
     state.chatUi = [WELCOME_MSG];
+    setPendingChatPhoto(null);
     renderChat();
     toast('Conversación reiniciada');
   });
@@ -859,15 +1136,54 @@ function bindEvents() {
   $('takePhotoBtn').addEventListener('click', openCameraFlow);
   $('galleryPhotoBtn').addEventListener('click', () => $('galleryFileInput').click());
   $('cameraFileInput').addEventListener('change', (e) => {
-    handlePhotoFile(e.target.files?.[0]);
+    handlePhotoFile(e.target.files?.[0], 'item');
     e.target.value = '';
   });
   $('galleryFileInput').addEventListener('change', (e) => {
-    handlePhotoFile(e.target.files?.[0]);
+    handlePhotoFile(e.target.files?.[0], 'item');
     e.target.value = '';
   });
   $('removePhotoBtn').addEventListener('click', () => setModalPhoto(null));
   $('scanPhotoBtn').addEventListener('click', scanCurrentPhoto);
+
+  // Recipe photo & form
+  $('recipePhotoBtn').addEventListener('click', () => $('recipePhotoInput').click());
+  $('recipePhotoInput').addEventListener('change', (e) => {
+    handlePhotoFile(e.target.files?.[0], 'recipe');
+    e.target.value = '';
+  });
+  $('removeRecipePhotoBtn').addEventListener('click', () => setRecipeModalPhoto(null));
+
+  $('recipeForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = $('recipeId').value || undefined;
+    const ingredients = $('recipeIngredients')
+      .value.split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    await state.store.saveRecipe({
+      id,
+      name: $('recipeName').value,
+      meal: $('recipeMeal').value,
+      kcal: $('recipeKcal').value,
+      protein: $('recipeProtein').value,
+      carbs: $('recipeCarbs').value,
+      fat: $('recipeFat').value,
+      ingredients,
+      steps: $('recipeSteps').value,
+      photo: state.currentRecipePhoto,
+    });
+    $('recipeModal').classList.add('hidden');
+    toast(id ? 'Receta actualizada' : 'Receta guardada en Mis Recetas');
+  });
+
+  $('deleteRecipeBtn').addEventListener('click', async () => {
+    const id = $('recipeId').value;
+    if (!id) return;
+    await state.store.deleteRecipe(id);
+    $('recipeModal').classList.add('hidden');
+    toast('Receta eliminada');
+  });
 
   $('closeCameraBtn').addEventListener('click', closeCameraModal);
   $('cancelCameraBtn').addEventListener('click', closeCameraModal);
@@ -1050,6 +1366,11 @@ async function boot() {
 
   state.store.subscribeItems((items) => {
     state.items = items;
+    renderAll();
+  });
+
+  state.store.subscribeRecipes((recipes) => {
+    state.recipes = recipes;
     renderAll();
   });
 

@@ -5,10 +5,27 @@ import { normalizeItem } from './inventory.js';
 import { SAMPLE_ITEMS } from './constants.js';
 
 const DB_NAME = 'fitdespensa_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const LEGACY_LS_KEY = 'mi_despensa_items_v1';
 const HOUSEHOLD_KEY = 'fitdespensa_household_code';
 const LEGACY_HOUSEHOLD_KEY = 'mi_despensa_household_code';
+
+function normalizeRecipe(r) {
+  return {
+    id: r.id || uid(),
+    name: String(r.name || 'Receta sin nombre').trim().slice(0, 80),
+    meal: r.meal || 'comida',
+    servings: Math.max(1, Number(r.servings) || 1),
+    kcal: Math.max(0, Math.round(Number(r.kcal) || 0)),
+    protein: Math.max(0, Math.round((Number(r.protein) || 0) * 10) / 10),
+    carbs: Math.max(0, Math.round((Number(r.carbs) || 0) * 10) / 10),
+    fat: Math.max(0, Math.round((Number(r.fat) || 0) * 10) / 10),
+    ingredients: Array.isArray(r.ingredients) ? r.ingredients : [],
+    steps: String(r.steps || '').trim().slice(0, 1200),
+    photo: typeof r.photo === 'string' && r.photo.startsWith('data:image/') ? r.photo : null,
+    updatedAt: r.updatedAt || Date.now(),
+  };
+}
 
 export function getHouseholdCode() {
   let code = localStorage.getItem(HOUSEHOLD_KEY) || localStorage.getItem(LEGACY_HOUSEHOLD_KEY);
@@ -49,6 +66,9 @@ function openDB() {
       if (!db.objectStoreNames.contains('meta')) {
         db.createObjectStore('meta', { keyPath: 'key' });
       }
+      if (!db.objectStoreNames.contains('recipes')) {
+        db.createObjectStore('recipes', { keyPath: 'id' });
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -70,6 +90,7 @@ async function createLocalStore() {
   const itemListeners = new Set();
   const logListeners = new Map(); // date -> Set(cb)
   const profileListeners = new Set();
+  const recipeListeners = new Set();
 
   // Migrate legacy localStorage data if present
   const existingItems = await idbTx(db, 'items', 'readonly', (s) => s.getAll());
@@ -114,6 +135,12 @@ async function createLocalStore() {
     const rec = await idbTx(db, 'meta', 'readonly', (s) => s.get('profile'));
     const profile = rec?.value || null;
     profileListeners.forEach((cb) => cb(profile));
+  };
+
+  const emitRecipes = async () => {
+    const raw = await idbTx(db, 'recipes', 'readonly', (s) => s.getAll());
+    const recipes = raw.map(normalizeRecipe).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    recipeListeners.forEach((cb) => cb(recipes));
   };
 
   const getLogsByDate = (date) =>
@@ -200,6 +227,21 @@ async function createLocalStore() {
       await idbTx(db, 'logs', 'readwrite', (s) => s.delete(id));
       if (date) await emitLogs(date);
     },
+    subscribeRecipes(cb) {
+      recipeListeners.add(cb);
+      emitRecipes();
+      return () => recipeListeners.delete(cb);
+    },
+    async saveRecipe(data) {
+      const rec = normalizeRecipe({ ...data, id: data.id || uid(), updatedAt: Date.now() });
+      await idbTx(db, 'recipes', 'readwrite', (s) => s.put(rec));
+      await emitRecipes();
+      return rec;
+    },
+    async deleteRecipe(id) {
+      await idbTx(db, 'recipes', 'readwrite', (s) => s.delete(id));
+      await emitRecipes();
+    },
   };
 }
 
@@ -222,6 +264,7 @@ async function createFirestoreStore(householdCode) {
   const db = fsMod.getFirestore(app);
   const itemsCol = () => fsMod.collection(db, 'households', householdCode, 'items');
   const logsCol = () => fsMod.collection(db, 'households', householdCode, 'logs');
+  const recipesCol = () => fsMod.collection(db, 'households', householdCode, 'recipes');
   const profileDoc = () => fsMod.doc(db, 'households', householdCode, 'meta', 'profile');
 
   return {
@@ -287,6 +330,24 @@ async function createFirestoreStore(householdCode) {
     },
     async deleteLog(id) {
       await fsMod.deleteDoc(fsMod.doc(logsCol(), id));
+    },
+    subscribeRecipes(cb) {
+      return fsMod.onSnapshot(recipesCol(), (snap) => {
+        const list = snap.docs
+          .map((d) => normalizeRecipe({ ...d.data(), id: d.id }))
+          .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        cb(list);
+      });
+    },
+    async saveRecipe(data) {
+      const id = data.id || uid();
+      const rec = normalizeRecipe({ ...data, id, updatedAt: Date.now() });
+      const { id: _ignore, ...payload } = rec;
+      await fsMod.setDoc(fsMod.doc(recipesCol(), id), payload);
+      return rec;
+    },
+    async deleteRecipe(id) {
+      await fsMod.deleteDoc(fsMod.doc(recipesCol(), id));
     },
   };
 }
