@@ -52,38 +52,71 @@ const SVG_CHECK = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" s
 const SVG_STAR = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
 
 // =========================================================================
-// 0) LIVE TELEMETRY STRIP (Top of Coach IA)
+// PANTRY-FIRST OVERVIEW STRIP (Top of Mi Despensa — Home)
+// =========================================================================
+export function renderPantryOverview({ items, profile }) {
+  const targets = calcTargets(profile);
+  const totals = pantryTotals(items);
+  const cov = coverageDays(totals, targets);
+  const lowItems = items.filter(inShoppingList);
+  const outCount = items.filter((it) => statusOf(it) === 'out').length;
+  const weeklyPct = cov?.protein != null ? Math.min(100, Math.round((cov.protein / 7) * 100)) : 0;
+
+  return `
+    <button type="button" class="live-pill" data-action="go-shopping">
+      <span class="live-pill-label">Por comprar</span>
+      <span class="live-pill-val" style="color:${lowItems.length ? 'var(--accent)' : 'var(--ok)'}">${lowItems.length}</span>
+      <span class="live-pill-sub">${outCount ? `${outCount} agotados` : lowItems.length ? 'bajos de stock' : 'todo surtido'}</span>
+    </button>
+    <button type="button" class="live-pill" data-action="${targets ? 'go-coach' : 'open-settings'}">
+      <span class="live-pill-label">Proteína en casa</span>
+      <span class="live-pill-val" style="color:var(--primary)">${cov?.protein != null ? `${cov.protein.toFixed(1)} días` : `${totals.protein} g`}</span>
+      <div class="progress-track"><div class="progress-fill" style="width:${weeklyPct}%"></div></div>
+    </button>
+    <button type="button" class="live-pill" data-action="go-catalog">
+      <span class="live-pill-label">Stock total</span>
+      <span class="live-pill-val">${items.length} prod.</span>
+      <span class="live-pill-sub num">${totals.kcal.toLocaleString('es-MX')} kcal disponibles</span>
+    </button>
+    <button type="button" class="live-pill" style="border-color:rgba(163,230,53,0.35); background:var(--primary-soft);" data-action="new-item">
+      <span class="live-pill-label" style="color:var(--primary)">Agregar rápido</span>
+      <span class="live-pill-val" style="color:var(--primary)">📷 Foto / Código</span>
+      <span class="live-pill-sub">Autocompleta tabla nutrimental</span>
+    </button>
+  `;
+}
+
+// =========================================================================
+// 0) LIVE TELEMETRY STRIP (Top of Coach IA — Pantry-first)
 // =========================================================================
 export function renderLiveStrip({ items, profile, todayLogs, waterMl = 0, streak = 0, trainingDay = false }) {
   const targets = calcTargets(profile, { trainingDay });
+  const totals = pantryTotals(items);
+  const cov = coverageDays(totals, targets);
   const eaten = logTotals(todayLogs);
   const lowCount = items.filter(inShoppingList).length;
-
-  const protPct = targets?.protein > 0 ? Math.min(100, Math.round((eaten.protein / targets.protein) * 100)) : 0;
-  const kcalPct = targets?.kcal > 0 ? Math.min(100, Math.round((eaten.kcal / targets.kcal) * 100)) : 0;
-  const wGoal = waterGoalMl(profile, trainingDay);
-  const waterPct = Math.min(100, Math.round((waterMl / wGoal) * 100));
+  const weeklyPct = cov?.protein != null ? Math.min(100, Math.round((cov.protein / 7) * 100)) : 0;
 
   return `
-    <button type="button" class="live-pill" data-action="go-diary">
-      <span class="live-pill-label">Proteína hoy</span>
-      <span class="live-pill-val" style="color:var(--primary)">${Math.round(eaten.protein)}${targets ? ` / ${targets.protein}g` : 'g'}</span>
-      <div class="progress-track"><div class="progress-fill" style="width:${protPct}%"></div></div>
+    <button type="button" class="live-pill" data-action="go-catalog">
+      <span class="live-pill-label">Despensa</span>
+      <span class="live-pill-val" style="color:var(--primary)">${cov?.protein != null ? `${cov.protein.toFixed(1)} días P` : `${items.length} prod.`}</span>
+      <div class="progress-track"><div class="progress-fill" style="width:${weeklyPct}%"></div></div>
+    </button>
+    <button type="button" class="live-pill" data-action="go-shopping">
+      <span class="live-pill-label">Por comprar</span>
+      <span class="live-pill-val" style="color:${lowCount ? 'var(--accent)' : 'var(--ok)'}">${lowCount}</span>
+      <span class="live-pill-sub">${lowCount ? 'artículos bajos' : 'todo surtido'}</span>
     </button>
     <button type="button" class="live-pill" data-action="go-diary">
-      <span class="live-pill-label">Calorías${trainingDay ? ' 💪' : ''}</span>
-      <span class="live-pill-val" style="color:var(--accent)">${Math.round(eaten.kcal)}${targets ? ` / ${targets.kcal}` : ' kcal'}</span>
-      <div class="progress-track"><div class="progress-fill kcal" style="width:${kcalPct}%"></div></div>
+      <span class="live-pill-label">Consumido hoy</span>
+      <span class="live-pill-val">${Math.round(eaten.protein)}g P · ${Math.round(eaten.kcal)} kcal</span>
+      <span class="live-pill-sub">${streak > 0 ? `Racha ${streak}d 🔥` : 'Ver diario'}</span>
     </button>
     <button type="button" class="live-pill" data-action="add-water-quick" title="Toca para sumar 250 ml">
       <span class="live-pill-label">Agua (+250 ml)</span>
-      <span class="live-pill-val" style="color:var(--blue)">${(waterMl / 1000).toFixed(2)} / ${(wGoal / 1000).toFixed(2)} L</span>
-      <div class="progress-track"><div class="progress-fill carbs" style="width:${waterPct}%"></div></div>
-    </button>
-    <button type="button" class="live-pill" data-action="go-shopping">
-      <span class="live-pill-label">${streak > 0 ? `Racha · ${streak}d 🔥` : 'Por comprar'}</span>
-      <span class="live-pill-val" style="color:${lowCount ? 'var(--accent)' : 'var(--ok)'}">${lowCount}</span>
-      <span class="live-pill-sub">${lowCount ? 'faltan en despensa' : 'despensa surtida'}</span>
+      <span class="live-pill-val" style="color:var(--blue)">${(waterMl / 1000).toFixed(2)} L</span>
+      <span class="live-pill-sub">Toque rápido</span>
     </button>
   `;
 }
@@ -367,6 +400,7 @@ export function renderCatalog({ items, search, category, stockFilter, viewMode }
     .filter((it) => {
       if (category !== 'Todas' && it.category !== category) return false;
       if (stockFilter === 'low' && !inShoppingList(it)) return false;
+      if (stockFilter === 'out' && statusOf(it) !== 'out') return false;
       if (q && !normText(it.name).includes(q) && !normText(it.category).includes(q)) return false;
       return true;
     })

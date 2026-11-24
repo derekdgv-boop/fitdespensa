@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23a3e635'/%3E%3Cpath d='M18 4 7 18h8l-1 10 11-14h-8l1-10z' fill='%230a1204'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="style.css?v=11" />
+  <link rel="stylesheet" href="style.css?v=12" />
 </head>
 <body>
   <div class="app-layout">
@@ -36,22 +36,22 @@
       </button>
 
       <nav class="nav-list" role="tablist">
-        <button class="nav-item active" data-tab="coach" role="tab" aria-selected="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/></svg>
-          <span>Coach IA</span>
-        </button>
-        <button class="nav-item" data-tab="diary" role="tab" aria-selected="false">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2M7 2v20M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>
-          <span>Comidas y Recetas</span>
-        </button>
-        <button class="nav-item" data-tab="catalog" role="tab" aria-selected="false">
+        <button class="nav-item active" data-tab="catalog" role="tab" aria-selected="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></svg>
-          <span>Despensa</span>
+          <span>Mi Despensa</span>
         </button>
         <button class="nav-item" data-tab="shopping" role="tab" aria-selected="false">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></svg>
           <span>Compras</span>
           <span class="nav-badge hidden" id="shoppingBadge">0</span>
+        </button>
+        <button class="nav-item" data-tab="coach" role="tab" aria-selected="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/></svg>
+          <span>Coach IA</span>
+        </button>
+        <button class="nav-item" data-tab="diary" role="tab" aria-selected="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2M7 2v20M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>
+          <span>Diario y Recetas</span>
         </button>
       </nav>
 
@@ -96,8 +96,8 @@
       </header>
 
       <main class="main">
-        <!-- 1. COACH IA (AI-First Home Hub) -->
-        <section class="view active" id="view-coach">
+        <!-- 1. COACH IA (Asistente de Despensa y Fitness) -->
+        <section class="view" id="view-coach">
           <!-- Compact Live Telemetry Strip -->
           <div id="liveSummaryStrip" class="live-strip"></div>
 
@@ -125,12 +125,12 @@
 
             <div class="chat-messages" id="chatMessages" aria-live="polite"></div>
 
-            <!-- Interactive Quick Prompts -->
+            <!-- Interactive Quick Prompts (Pantry-first) -->
             <div class="coach-prompts" id="coachSuggestions">
-              <button type="button" class="prompt-pill" data-prompt="Me comí 3 huevos con avena en el desayuno, regístralo">Registrar desayuno</button>
-              <button type="button" class="prompt-pill" data-prompt="¿Qué puedo cenar alto en proteína con lo que tengo en mi despensa?">¿Qué ceno hoy?</button>
-              <button type="button" class="prompt-pill" data-prompt="Sugiéreme una comida rápida con lo que tengo y guárdala en Mis Recetas">Crear y guardar receta</button>
-              <button type="button" class="prompt-pill" data-prompt="¿Qué me falta comprar para completar mi semana de proteína?">¿Qué compro?</button>
+              <button type="button" class="prompt-pill" data-prompt="¿Qué me falta comprar esta semana según mis mínimos de despensa?">¿Qué me falta comprar?</button>
+              <button type="button" class="prompt-pill" data-prompt="¿Para cuántos días me alcanza la proteína que tengo en casa ahora mismo?">Días de proteína en casa</button>
+              <button type="button" class="prompt-pill" data-prompt="¿Qué puedo cocinar alto en proteína usando solo lo que tengo en mi despensa?">¿Qué cocino con lo que tengo?</button>
+              <button type="button" class="prompt-pill" data-prompt="Compré 2 kg de pechuga de pollo y 12 huevos, agrégalo a mi despensa">Sumar compras del súper</button>
             </div>
 
             <!-- Pending Photo Attachment Preview with 2 quick athlete modes -->
@@ -218,17 +218,20 @@
           </div>
         </section>
 
-        <!-- 3. DESPENSA (Catálogo) -->
-        <section class="view" id="view-catalog">
+        <!-- 3. DESPENSA (Pantalla Principal) -->
+        <section class="view active" id="view-catalog">
           <div class="page-head">
             <div>
               <h1 class="page-title">Mi Despensa</h1>
-              <p class="page-sub">Tus productos con foto, stock y macros por porción</p>
+              <p class="page-sub">Controla qué tienes en casa, sube fotos con tabla nutrimental automática y sabe cuándo comprar</p>
             </div>
             <div class="page-actions">
               <button type="button" class="btn btn-primary btn-sm" id="catalogAddBtn">+ Agregar producto</button>
             </div>
           </div>
+
+          <!-- Pantry-First KPI Overview Strip -->
+          <div id="pantryOverviewStrip" class="live-strip"></div>
 
           <div class="toolbar">
             <div class="search-wrap">
@@ -238,6 +241,7 @@
             <div class="segmented" role="group" aria-label="Filtro rápido">
               <button type="button" class="seg-btn active" data-stock-filter="all">Todos</button>
               <button type="button" class="seg-btn" data-stock-filter="low">Por comprar</button>
+              <button type="button" class="seg-btn" data-stock-filter="out">Agotados</button>
             </div>
             <div class="segmented" role="group" aria-label="Vista">
               <button type="button" class="seg-btn active" data-view-mode="grid" title="Cuadrícula" aria-label="Cuadrícula">
@@ -270,17 +274,9 @@
       </main>
     </div>
 
-    <!-- Mobile Bottom Tab Bar (4 clean tabs) -->
+    <!-- Mobile Bottom Tab Bar (Pantry-first) -->
     <nav class="mobile-nav" role="tablist" aria-label="Navegación móvil">
-      <button class="mnav-item active" data-tab="coach" role="tab" aria-selected="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/></svg>
-        <span>Coach IA</span>
-      </button>
-      <button class="mnav-item" data-tab="diary" role="tab" aria-selected="false">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2M7 2v20M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>
-        <span>Comidas</span>
-      </button>
-      <button class="mnav-item" data-tab="catalog" role="tab" aria-selected="false">
+      <button class="mnav-item active" data-tab="catalog" role="tab" aria-selected="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/></svg>
         <span>Despensa</span>
       </button>
@@ -288,6 +284,14 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/></svg>
         <span>Compras</span>
         <span class="mnav-dot hidden" id="shoppingBadgeMobile">0</span>
+      </button>
+      <button class="mnav-item" data-tab="coach" role="tab" aria-selected="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/></svg>
+        <span>Coach IA</span>
+      </button>
+      <button class="mnav-item" data-tab="diary" role="tab" aria-selected="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2M7 2v20M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>
+        <span>Diario</span>
       </button>
     </nav>
   </div>
@@ -765,6 +769,6 @@
   <!-- Toast Container -->
   <div class="toast-container" id="toastContainer" aria-live="polite"></div>
 
-  <script type="module" src="app.js?v=11"></script>
+  <script type="module" src="app.js?v=12"></script>
 </body>
 </html>

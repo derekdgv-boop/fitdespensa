@@ -46,10 +46,11 @@ import {
   renderDiaryMeals,
   renderDiarySummary,
   renderLiveStrip,
+  renderPantryOverview,
   renderProgress,
   renderRecipes,
   renderShoppingList,
-} from './ui.js?v=11';
+} from './ui.js?v=12';
 
 const SVG_SUN = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>`;
 const SVG_MOON = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>`;
@@ -57,7 +58,7 @@ const SVG_CAMERA_PLACEHOLDER = `<svg viewBox="0 0 24 24" width="28" height="28" 
 
 const WELCOME_MSG = {
   role: 'ai',
-  text: '¡Hola! Soy tu **Coach IA de FitDespensa**.\n\nSolo **escríbeme, háblame con el micrófono o mándame una foto**:\n• Foto de tu plato → estimo macros y lo subo a tu diario\n• «Me comí 3 huevos con avena» → lo registro y descuento de tu despensa\n• «Guarda esta comida como receta» → queda lista en **Mis Recetas** para repetirla en 1 toque',
+  text: '¡Hola! Soy tu **Asistente de Despensa FitDespensa**.\n\nTe ayudo a mantener tu inventario siempre surtido:\n• **Manda foto** de un producto o etiqueta → lo subo a tu despensa con su tabla nutrimental completa\n• **Dime qué compraste o gastaste** → actualizo tu stock y tu lista de compras al instante\n• **Pregúntame qué cocinar** → te sugiero ideas reales con lo que tienes en casa',
 };
 
 // =========================================================================
@@ -68,7 +69,7 @@ const state = {
   items: [],
   recipes: [],
   profile: null,
-  activeTab: 'coach',
+  activeTab: 'catalog',
   mealsSub: 'today',
   search: '',
   category: 'Todas',
@@ -151,6 +152,11 @@ function renderAll() {
   const cov = coverageDays(totals, targets);
   $('sidebarCoverageVal').textContent =
     cov?.protein != null ? `${cov.protein.toFixed(1)} días de proteína` : `${totals.protein} g en stock`;
+
+  $('pantryOverviewStrip').innerHTML = renderPantryOverview({
+    items: state.items,
+    profile: state.profile,
+  });
 
   $('liveSummaryStrip').innerHTML = renderLiveStrip({
     items: state.items,
